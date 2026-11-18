@@ -15,7 +15,7 @@ import * as starter from './starter.js';
 import crypto from 'node:crypto';
 import { zipDir } from './zip.js';
 import { getCookie, setCookie } from 'hono/cookie';
-import { renderLockPage, expandTree, extraLangs } from '@vystara/core';
+import { renderLockPage, expandTree, extraLangs, checkLinks } from '@vystara/core';
 import { frame } from '@vystara/core';
 
 const fresh = store.seedIfEmpty();
@@ -359,6 +359,20 @@ app.get('/api/export.zip', async (c) => {
   }
   const name = (store.slugify(store.getSite().name) || 'website') + '.zip';
   return new Response(new Uint8Array(zipDir(paths.site)), { headers: { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${name}"`, 'cache-control': 'no-store' } });
+});
+
+// Kapotte interne links zoeken (de Studio vraagt dit vóór het publiceren).
+app.get('/api/linkcheck', (c) => {
+  const site = store.getSite();
+  const pages = store.listPages().filter((p) => p.kind === 'page');
+  return c.json({
+    issues: checkLinks({
+      pages,
+      projects: store.listProjects(),
+      components: store.listComponents(),
+      languages: site.languages ?? [],
+    }),
+  });
 });
 
 app.post('/api/publish', async (c) => {

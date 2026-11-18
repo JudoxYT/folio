@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { getGuides } from './Rulers';
+import { GridOverlay } from './Grid';
 import {
   BASE_CSS,
   BREAKPOINT_CANVAS,
@@ -400,7 +401,7 @@ function edgeCursor(edge: Edge, rot: number) {
 const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/><path d="M20 12a8 8 0 1 1-2.3-5.6" fill="none" stroke="black" stroke-width="2" stroke-linecap="round"/><path d="M20 3v5h-5" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 3v5h-5" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>')}") 12 12, grab`;
 
 export function Canvas() {
-  const { tree, bp, zoom, assets, components, projects, site, selection, extra, hover, editingText, doc, lang } = useStore();
+  const { tree, bp, zoom, assets, components, projects, site, selection, extra, hover, editingText, doc, lang, split } = useStore();
   const viewport = useRef<HTMLDivElement>(null);
   const [rects, setRects] = useState<{ sel: DOMRect | null; hov: DOMRect | null; extra: DOMRect[] }>({ sel: null, hov: null, extra: [] });
   const [dropLine, setDropLine] = useState<DOMRect | null>(null);
@@ -682,6 +683,11 @@ export function Canvas() {
 
   const width = BREAKPOINT_CANVAS[bp];
   const ctx: RenderCtx = { bp, assets: assetMap, editingText, styles: siteTheme(site).styles, lang };
+  // Naast elkaar: bij desktop zie je mobiel ernaast, anders desktop (kleiner).
+  const altBp: Breakpoint = bp === 'desktop' ? 'mobile' : 'desktop';
+  const altWidth = BREAKPOINT_CANVAS[altBp];
+  const altZoom = altBp === 'desktop' ? Math.max(0.15, zoom * 0.4) : zoom;
+  const altCtx: RenderCtx = { ...ctx, bp: altBp, editingText: null };
 
   const idAt = (target: EventTarget | null): string | null => {
     const el = (target as HTMLElement | null)?.closest?.('[data-id]') as HTMLElement | null;
@@ -910,12 +916,23 @@ export function Canvas() {
         if ((e.target as HTMLElement).closest('a')) e.preventDefault();
       }}
     >
-      <style>{BASE_CSS.replace(/html,body\{[^}]*\}/, '').replace(/body\{[^}]*\}/, '')}{'\n'}{RUNTIME_CSS.replace(/html\{[^}]*\}/, '')}{'\n'}{themeCss(siteTheme(site), { bp, root: '.vs-board' })}</style>
-      <div className="vs-board-wrap" style={{ width: width * zoom + 160 }}>
-        <div className="vs-board-label">{docLabel()} · {width}px</div>
-        <div className="vs-board" style={{ width, zoom }}>
-          <RenderNode node={expanded} parentMode="vertical" ctx={ctx} />
+      <style>{BASE_CSS.replace(/html,body\{[^}]*\}/, '').replace(/body\{[^}]*\}/, '')}{'\n'}{RUNTIME_CSS.replace(/html\{[^}]*\}/, '')}{'\n'}{themeCss(siteTheme(site), { bp, root: '.vs-board' })}{split ? '\n' + themeCss(siteTheme(site), { bp: altBp, root: '.vs-board-alt' }) : ''}</style>
+      <div className={`vs-board-wrap${split ? ' split' : ''}`} style={{ width: width * zoom + 160 + (split ? altWidth * altZoom + 56 : 0) }}>
+        <div className="vs-board-col">
+          <div className="vs-board-label">{docLabel()} · {width}px</div>
+          <div className="vs-board" style={{ width, zoom }}>
+            <RenderNode node={expanded} parentMode="vertical" ctx={ctx} />
+            <GridOverlay bp={bp} />
+          </div>
         </div>
+        {split && (
+          <div className="vs-board-col">
+            <div className="vs-board-label">{altBp === 'mobile' ? 'Mobiel' : 'Desktop'} · {altWidth}px · voorbeeld</div>
+            <div className="vs-board-alt" style={{ width: altWidth, zoom: altZoom }} onMouseDown={(e) => { e.stopPropagation(); const raw = idAt(e.target); if (raw) select(sourceId(raw)); }}>
+              <RenderNode node={expanded} parentMode="vertical" ctx={altCtx} />
+            </div>
+          </div>
+        )}
       </div>
       {rects.hov && <div className="vs-outline vs-hover" style={box(rects.hov)} />}
       {rects.extra.map((r, i) => <div key={i} className="vs-outline vs-selected" style={box(r)} />)}

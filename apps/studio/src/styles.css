@@ -491,3 +491,60 @@ input[type='color'] { width: 30px; height: 30px; padding: 0; border: 1px solid v
 .vs-tour-card p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.5; color: var(--ui-muted, #b5b5c0); }
 .vs-tour-actions { display: flex; gap: 8px; align-items: center; }
 .vs-tour-actions .grow { flex: 1; }
+
+/* Mobiel en desktop naast elkaar */
+.vs-board-wrap.split { display: flex; gap: 56px; align-items: flex-start; }
+.vs-board-alt { position: relative; background: var(--bg, #fff); color: var(--text, #111); font-family: var(--font-body, system-ui); -webkit-font-smoothing: antialiased; box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 24px 70px rgba(0,0,0,.55); border-radius: 4px; cursor: pointer; }
+.vs-board-alt * { pointer-events: none; }
+.vs-board-alt { pointer-events: auto; }
+.vs-board-alt a { cursor: pointer; }
+
+/* Kolommenraster */
+.vs-grid { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.vs-grid i { display: block; height: 100%; }
+.vs-gridbtn, .vs-steps { position: relative; display: inline-flex; align-items: center; }
+.vs-gridbtn-more { width: 18px !important; padding: 0 !important; font-size: 10px; margin-left: -4px; }
+.vs-icon-btn.on { color: var(--ui-accent); background: var(--ui-accent-soft); }
+.vs-gridpop, .vs-steps-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 90; background: var(--ui-panel); border: 1px solid var(--ui-line);
+  border-radius: 12px; padding: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.45); display: grid; gap: 8px; width: 230px; font-size: 13px;
+}
+.vs-gridpop label { display: grid; grid-template-columns: 1fr 90px; align-items: center; gap: 8px; }
+.vs-gridpop label.vs-check { display: flex; }
+.vs-gridpop .vs-input { width: 100%; }
+
+/* Geschiedenispaneel */
+.vs-steps-pop { width: 280px; }
+.vs-steps-pop .vs-help { margin: 0; }
+.vs-steps-pop ol { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; border: 1px solid var(--ui-line); border-radius: 8px; }
+.vs-steps-pop li { display: flex; justify-content: space-between; gap: 8px; padding: 7px 10px; cursor: pointer; border-top: 1px solid var(--ui-line-soft); }
+.vs-steps-pop li:first-child { border-top: 0; }
+.vs-steps-pop li:hover { background: var(--ui-panel-2); }
+.vs-steps-pop li.now { background: var(--ui-accent-soft); color: var(--ui-text); font-weight: 600; }
+.vs-steps-pop li.undone { color: var(--ui-faint); text-decoration: line-through; }
+.vs-steps-pop small { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+
+/* Linkcheck vóór publiceren */
+.vs-linkissues { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--ui-line); border-radius: 10px; }
+.vs-linkissues li { display: grid; gap: 2px; padding: 10px 12px; border-top: 1px solid var(--ui-line-soft); font-size: 13px; }
+.vs-linkissues li:first-child { border-top: 0; }
+.vs-linkissues code { color: var(--ui-accent); font-size: 12.5px; word-break: break-all; }
+.vs-linkissues small { color: var(--ui-muted); }
+
+/* Kleuren uit een afbeelding */
+.vs-imgpal-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; margin-bottom: 10px; }
+.vs-imgpal-pick button { aspect-ratio: 1; border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-bg); padding: 3px; cursor: pointer; overflow: hidden; }
+.vs-imgpal-pick button:hover { border-color: var(--ui-accent); }
+.vs-imgpal-pick img { width: 100%; height: 100%; object-fit: contain; }
+.vs-imgpal-up { font-size: 20px; color: var(--ui-muted); }
+.vs-imgpal-colors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.vs-imgpal-colors button { border: 2px solid transparent; border-radius: 8px; padding: 14px 10px 6px; font: 600 11px/1 ui-monospace, monospace; cursor: pointer; min-width: 74px; }
+.vs-imgpal-colors button.on { border-color: var(--ui-text); box-shadow: 0 0 0 2px var(--ui-bg) inset; }
+
+/* Eigen sneltoetsen */
+.vs-keymap { display: grid; gap: 2px; max-height: 60vh; overflow: auto; }
+.vs-keybtn { min-width: 120px; font-family: ui-monospace, monospace; font-size: 12px; }
+.vs-keybtn.rec { border-color: var(--ui-accent); color: var(--ui-accent); }
+
+/* Update-melding in de Studio (desktop-app) */
+.vs-update { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 150; display: flex; align-items: center; gap: 12px; background: var(--ui-panel); border: 1px solid var(--ui-accent); border-radius: 12px; padding: 10px 12px 10px 16px; box-shadow: 0 14px 40px rgba(0,0,0,.45); font-size: 13.5px; }

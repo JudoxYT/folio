@@ -1,7 +1,7 @@
 import type { Asset, Breakpoint, CollectionNode, FrameNode, FormNode, Seo, SiteSettings, Style, VNode } from './types.js';
 import { BREAKPOINT_MAX, BREAKPOINT_ORDER } from './types.js';
 import { childParentMode, color, cssToString, nodeCss, resolveProps, type Css } from './style.js';
-import { themeCss, preloadFonts } from './theme.js';
+import { themeCss, preloadFonts, altSchemeKey, colorModeCss, themeIsDark } from './theme.js';
 import { siteTheme } from './defaults.js';
 import { SVG_LIBRARY, svgColorVars, uniqueSvgIds } from './svg.js';
 import { assetUrl, embedSrc, walk } from './tree.js';
@@ -363,6 +363,13 @@ export function renderDocument(doc: PageDocument, ctx: RenderContext): string {
   };
   const transitionCss = PT[pt] ? `@view-transition{navigation:auto}@media (prefers-reduced-motion:no-preference){${PT[pt]}}@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}` : '';
 
+  // Licht/donker-knop voor bezoekers.
+  const modeKey = site.colorMode?.toggle ? altSchemeKey(theme, site.colorMode.alt) : null;
+  const dark = themeIsDark(theme);
+  const modeButton = modeKey
+    ? `<button class="v-mode" type="button" aria-label="${dark ? 'Lichte modus' : 'Donkere modus'}" title="Licht / donker"><svg class="v-mode-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg><svg class="v-mode-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg></button><script>(function(){var b=document.currentScript.previousElementSibling,h=document.documentElement;function s(){var a=h.dataset.mode==='alt';b.setAttribute('aria-pressed',a);b.dataset.show=(a?${dark ? "'moon'" : "'sun'"}:${dark ? "'sun'" : "'moon'"});}s();b.addEventListener('click',function(){var a=h.dataset.mode!=='alt';if(a)h.dataset.mode='alt';else delete h.dataset.mode;try{localStorage.setItem('v-mode',a?'alt':'')}catch(e){}s();});})()</script>`
+    : '';
+
   const head = [
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -389,7 +396,9 @@ export function renderDocument(doc: PageDocument, ctx: RenderContext): string {
     firstMedia ? `<link rel="preload" href="${esc(mu(firstMedia))}" as="image" fetchpriority="high">` : '',
     site.fontsHref ? `<link rel="stylesheet" href="${esc(site.fontsHref)}">` : '',
     reveal ? `<script>${RUNTIME_HEAD}</script>` : '',
-    `<style>${BASE_CSS}\n${transitionCss}\n${RUNTIME_CSS}\n${themeCss(theme, { mediaUrl: mu })}\n${collectCss(doc.tree, ctx)}</style>`,
+    modeKey ? `<script>try{if(localStorage.getItem('v-mode')==='alt')document.documentElement.dataset.mode='alt'}catch(e){}</script>` : '',
+    `<style>${BASE_CSS}\n${transitionCss}\n${RUNTIME_CSS}\n${themeCss(theme, { mediaUrl: mu })}\n${modeKey ? colorModeCss(theme, modeKey) + '\n' + MODE_CSS : ''}\n${collectCss(doc.tree, ctx)}</style>`,
+    site.analytics === 'vercel' ? '<script defer src="/_vercel/insights/script.js"></script>' : '',
     ...(doc.jsonLd ?? []).map((j) => `<script type="application/ld+json">${JSON.stringify(j).replace(/</g, '\\u003c')}</script>`),
     seo.headCode ?? '',
   ].filter(Boolean);
@@ -405,6 +414,7 @@ ${head.join('\n')}
 <body${site.cursor === 'default' ? ' data-cursor="off"' : ''}>
 ${body}
 ${switcher}
+${modeButton}
 ${hasSound ? `<script>${SOUND_SCRIPT}</script>` : ''}
 ${runtime ? `<script>${RUNTIME_JS}</script>` : ''}
 </body>
@@ -429,3 +439,10 @@ export function renderLockPage(site: SiteSettings, opts: { mode: 'maintenance' |
 .lock-err{color:#ff6b6b}</style></head>
 <body><main class="lock"><p class="ts-label">${esc(site.name)}</p><h1 class="ts-h1">${esc(title)}</h1><p class="ts-large" style="max-width:560px">${esc(msg)}</p>${form}</main></body></html>`;
 }
+
+/** Stijl van de licht/donker-knop: rond, rechtsonder, in de kleuren van het thema. */
+const MODE_CSS = `.v-mode{position:fixed;right:18px;bottom:18px;z-index:90;width:46px;height:46px;border-radius:999px;border:1px solid color-mix(in srgb,var(--text) 22%,transparent);background:var(--surface);color:var(--heading);display:grid;place-items:center;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);transition:transform .2s ease}
+.v-mode:hover{transform:scale(1.07)}.v-mode:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.v-mode svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:none}
+.v-mode .v-mode-moon{fill:currentColor;stroke:none}
+.v-mode[data-show=sun] .v-mode-sun,.v-mode[data-show=moon] .v-mode-moon{display:block}`;

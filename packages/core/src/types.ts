@@ -433,6 +433,10 @@ export interface SiteSettings {
   lightbox?: 'projects' | 'all' | 'off';
   /** Vloeiende overgang tussen pagina's. Standaard: vervagen. */
   pageTransition?: 'none' | 'fade' | 'slide' | 'zoom' | 'wipe';
+  /** Knop waarmee bezoekers tussen licht en donker wisselen. `alt` = kleurenschema voor de andere modus (leeg = automatisch). */
+  colorMode?: { toggle: boolean; alt?: string };
+  /** Bezoekersstatistieken: Vercel Web Analytics (werkt alleen als de site op Vercel staat). */
+  analytics?: 'off' | 'vercel';
   /** Label-cursor ("Bekijk") boven projecten. 'default' = uit. */
   cursor?: 'default' | 'star';
   /**

@@ -22,6 +22,7 @@ import { api } from './api';
 import { patchState, saveSite, toast, useStore } from './store';
 import { ColorField, Num, Row, Select, Text, Toggle } from './ui';
 import { askText } from './dialog';
+import { ImagePalette } from './ImagePalette';
 
 type Tab = 'gallery' | 'colors' | 'type' | 'buttons' | 'fonts';
 
@@ -218,6 +219,7 @@ function Colors({ t, set }: { t: Theme; set: (t: Theme) => void }) {
       <Row label="Hoeken">
         <Num value={t.radius} min={0} suffix="px" onChange={(v) => set({ ...t, radius: v ?? 0 })} />
       </Row>
+      <ImagePalette t={t} set={set} />
     </>
   );
 }

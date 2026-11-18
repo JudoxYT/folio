@@ -23,6 +23,7 @@ import {
   zoomToSelection,
   selectSimilar,
   uploadAndInsert,
+  toggleSplit,
   alignSelection,
   distributeSelection,
   paste,
@@ -48,10 +49,14 @@ import { api } from './api';
 import { Modal, Row, Select, Text, Toggle } from './ui';
 import { Rulers, toggleRulers } from './Rulers';
 import { edition, isFolio } from './edition';
-import { LANGUAGES, extraLangs, mainLang, translationProgress } from '@vystara/core';
+import { LANGUAGES, extraLangs, mainLang, translationProgress, siteTheme, altSchemeKey } from '@vystara/core';
 import { ThemeModal } from './ThemeModal';
 import { FindReplaceModal } from './FindReplace';
 import { Tour } from './Tour';
+import { confirmLinks } from './dialog';
+import { GridButton, toggleGrid } from './Grid';
+import { StepsButton } from './Steps';
+import { ACTIONS, KeymapEditor, customKeys, handleCustomKey } from './Keymap';
 import { AccessModal, HostingModal } from './Hosting';
 import { Breadcrumbs, CommandPalette, ContextMenu, SaveSectionModal } from './Overlays';
 import { findParent } from '@vystara/core';
@@ -67,7 +72,7 @@ function selectionHasText() {
 }
 
 export function Editor({ onLogout }: { onLogout: () => void }) {
-  const { bp, zoom, save, toast: t, modal, doc, unread, site } = useStore();
+  const { bp, zoom, save, toast: t, modal, doc, unread, site, split } = useStore();
   const lock = site?.access?.mode ?? 'open';
   const [publishing, setPublishing] = useState(false);
   useShortcuts();
@@ -83,6 +88,9 @@ export function Editor({ onLogout }: { onLogout: () => void }) {
     setPublishing(true);
     try {
       await flushSave();
+      // Eerst kapotte links zoeken; bij problemen kies je zelf of je toch publiceert.
+      const check = await api.get<{ issues: { where: string; layer: string; href: string; reason: string }[] }>('/api/linkcheck').catch(() => ({ issues: [] }));
+      if (check.issues.length && !(await confirmLinks(check.issues))) return;
       const r = await api.post<{ pages: number; projects: number; files: number; durationMs: number; commandOutput?: string; deploy?: { ok: boolean; message: string } | null }>('/api/publish');
       toast(`Gepubliceerd: ${r.pages} pagina's, ${r.projects} projecten, ${r.files} bestanden${r.deploy ? ` · GitHub: ${r.deploy.message}${r.deploy.ok ? ' → Vercel zet hem binnen ±1 minuut live' : ''}` : ''}`, r.deploy && !r.deploy.ok ? 'error' : 'info');
       if (r.commandOutput) console.info(r.commandOutput);
@@ -134,6 +142,11 @@ export function Editor({ onLogout }: { onLogout: () => void }) {
               </button>
             ))}
           </div>
+          <button className={`vs-icon-btn ${split ? 'on' : ''}`} title="Mobiel en desktop naast elkaar (Shift+M)" onClick={toggleSplit}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="13" height="16" rx="2" /><rect x="17" y="7" width="5" height="11" rx="1" /></svg>
+          </button>
+          <GridButton bp={bp} />
+          <StepsButton />
           <LangSwitch />
           <select className="vs-input vs-zoom" value={zoom} onChange={(e) => patchState({ zoom: Number(e.target.value) })} title="Zoom">
             {[...new Set([0.25, 0.5, 0.75, 1, 1.25, 1.5, zoom])].sort((a, b) => a - b).map((z) => (
@@ -175,6 +188,7 @@ export function Editor({ onLogout }: { onLogout: () => void }) {
       {modal === 'shortcuts' && <ShortcutsModal />}
       {modal === 'find' && <FindReplaceModal />}
       <Tour />
+      <UpdateBanner />
       {modal === 'history' && <HistoryModal />}
       {modal === 'inbox' && <InboxModal />}
       {modal === 'theme' && <ThemeModal />}
@@ -204,6 +218,8 @@ function useShortcuts() {
       const typing = el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
+      // Eigen sneltoetsen gaan voor (niet tijdens typen).
+      if (!typing && handleCustomKey(e)) return;
 
       if (mod && k === 'k') {
         e.preventDefault();
@@ -285,6 +301,12 @@ function useShortcuts() {
       } else if (e.shiftKey && !mod && e.code === 'Digit1') {
         e.preventDefault();
         fitZoom();
+      } else if (e.shiftKey && !mod && !e.altKey && e.code === 'KeyG') {
+        e.preventDefault();
+        toggleGrid();
+      } else if (e.shiftKey && !mod && !e.altKey && e.code === 'KeyM') {
+        e.preventDefault();
+        toggleSplit();
       } else if (e.shiftKey && !mod && e.code === 'Digit2') {
         e.preventDefault();
         zoomToSelection();
@@ -461,6 +483,19 @@ function SiteModal() {
             </Row>
             <p className="vs-help">Klik op een beeld en het opent groot, met pijltjes en swipen naar het volgende. Kleine beelden (logo’s, iconen) doen niet mee. De overgang werkt in Chrome, Edge en Safari; andere browsers wisselen gewoon direct.</p>
             <p className="vs-help">Kleuren, lettertypes, tekst- en knopstijlen staan bij 🎨 Thema.</p>
+            <div className="vs-subhead">Bezoekers</div>
+            <Row label=""><Toggle value={!!draft.colorMode?.toggle} onChange={(v) => setDraft({ ...draft, colorMode: { ...(draft.colorMode ?? {}), toggle: v } })} label="Licht/donker-knop rechtsonder" /></Row>
+            {draft.colorMode?.toggle && (
+              <Row label="Andere modus">
+                <Select
+                  value={draft.colorMode?.alt ?? ''}
+                  onChange={(v) => setDraft({ ...draft, colorMode: { toggle: true, alt: v || undefined } })}
+                  options={[{ value: '', label: `Automatisch (${altLabel(draft) ?? 'geen tegengesteld schema'})` }, ...Object.entries(siteTheme(draft).schemes).filter(([k]) => k !== siteTheme(draft).defaultScheme).map(([value, sc]) => ({ value, label: sc.name ?? value }))]}
+                />
+              </Row>
+            )}
+            <Row label=""><Toggle value={draft.analytics === 'vercel'} onChange={(v) => setDraft({ ...draft, analytics: v ? 'vercel' : 'off' })} label="Bezoekersstatistieken (Vercel Analytics)" /></Row>
+            {draft.analytics === 'vercel' && <p className="vs-help">Zet in Vercel ook <b>Analytics</b> aan: Project → Analytics → Enable. Gratis, zonder cookies; je ziet daar hoeveel mensen je site bekijken en waar ze vandaan komen. Werkt alleen als je site op Vercel staat.</p>}
           </div>
           <div>
             <div className="vs-subhead">Als de site ergens anders staat</div>
@@ -720,7 +755,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ]],
   ['Canvas', [
     ['Ctrl + scrollwiel', 'Zoomen rond de muis'], ['Spatie + slepen', 'Canvas verschuiven'], ['Middelste\u00a0muisknop', 'Canvas verschuiven'],
-    ['Ctrl + / Ctrl − / Ctrl 0', 'In- en uitzoomen / 100%'], ['Shift R', 'Linialen aan/uit'], ['Liniaal slepen', 'Hulplijn maken (terugslepen = weg)'], ['Shift 1 / Shift 2', 'Alles in beeld / inzoomen op selectie'], ['Pijltjes (Shift)', 'Verplaatsen 1 px (10 px)'], ['Ctrl tijdens slepen', 'Slim uitlijnen uit'], ['Alt ingedrukt', 'Afstanden meten tot de laag onder de muis'], ['Bestanden slepen', 'Afbeelding of video op het canvas zetten'],
+    ['Ctrl + / Ctrl − / Ctrl 0', 'In- en uitzoomen / 100%'], ['Shift R', 'Linialen aan/uit'], ['Liniaal slepen', 'Hulplijn maken (terugslepen = weg)'], ['Shift 1 / Shift 2', 'Alles in beeld / inzoomen op selectie'], ['Shift G', 'Kolommenraster aan/uit'], ['Shift M', 'Mobiel en desktop naast elkaar'], ['Pijltjes (Shift)', 'Verplaatsen 1 px (10 px)'], ['Ctrl tijdens slepen', 'Slim uitlijnen uit'], ['Alt ingedrukt', 'Afstanden meten tot de laag onder de muis'], ['Bestanden slepen', 'Afbeelding of video op het canvas zetten'],
   ]],
   ['Selecteren en lagen', [
     ['Tab / Shift Tab', 'Volgende / vorige laag'], ['Enter / Shift Enter', 'Laag erin / laag erboven'], ['Esc', 'Naar de laag erboven'], ['Ctrl Shift A', 'Alles wat erop lijkt selecteren'], ['F2 / Ctrl R', 'Hernoemen'], ['Ctrl Shift H', 'Verbergen'], ['Ctrl Shift L', 'Vergrendelen'], ['Alt + slepen', 'Kopie slepen'],
@@ -737,8 +772,29 @@ const SHORTCUTS: [string, [string, string][]][] = [
 ];
 
 function ShortcutsModal() {
+  const [edit, setEdit] = useState(false);
   return (
     <Modal title="Sneltoetsen" wide onClose={() => patchState({ modal: null })}>
+      <div className="vs-seg" style={{ marginBottom: 14 }}>
+        <button className={!edit ? 'on' : ''} onClick={() => setEdit(false)}>Overzicht</button>
+        <button className={edit ? 'on' : ''} onClick={() => setEdit(true)}>Aanpassen</button>
+      </div>
+      {edit ? <KeymapEditor /> : <ShortcutList />}
+      <p className="vs-help" style={{ marginTop: 16 }}>Op een Mac is Ctrl overal ⌘.</p>
+    </Modal>
+  );
+}
+
+function ShortcutList() {
+  const custom = customKeys();
+  const moved = ACTIONS.filter((a) => custom[a.id] !== undefined);
+  return (
+    <>
+      {!!moved.length && (
+        <div className="vs-help" style={{ marginTop: 0 }}>
+          Eigen sneltoetsen: {moved.map((a) => `${a.label} → ${custom[a.id] || 'geen'}`).join(' · ')}
+        </div>
+      )}
       <div className="vs-shortcuts">
         {SHORTCUTS.map(([group, rows]) => (
           <div key={group}>
@@ -752,8 +808,7 @@ function ShortcutsModal() {
           </div>
         ))}
       </div>
-      <p className="vs-help" style={{ marginTop: 16 }}>Op een Mac is Ctrl overal ⌘.</p>
-    </Modal>
+    </>
   );
 }
 
@@ -778,6 +833,34 @@ function LangSwitch() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Naam van het schema dat automatisch voor de andere modus gekozen wordt. */
+function altLabel(site: SiteSettings): string | null {
+  const t = siteTheme(site);
+  const k = altSchemeKey(t);
+  return k ? t.schemes[k]?.name ?? k : null;
+}
+
+/** In de desktop-app: melding als er een nieuwe versie van Folio klaarstaat. */
+function UpdateBanner() {
+  const [info, setInfo] = useState<{ version: string; ready?: boolean; mac?: boolean } | null>(null);
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    const f = (window as unknown as { folio?: { onUpdate?: (fn: (i: { version: string; ready?: boolean; mac?: boolean }) => void) => void } }).folio;
+    f?.onUpdate?.((i) => { setInfo(i); setHidden(false); });
+  }, []);
+  if (!info || hidden || (!info.ready && !info.mac)) return null;
+  const folio = (window as unknown as { folio: { installUpdate: () => void; external: (u: string) => void } }).folio;
+  return (
+    <div className="vs-update">
+      <span>Folio {info.version} {info.ready ? 'staat klaar.' : 'is uit.'}</span>
+      {info.ready
+        ? <button className="vs-btn primary" onClick={async () => { await flushSave(); folio.installUpdate(); }}>Herstarten en bijwerken</button>
+        : <button className="vs-btn primary" onClick={() => folio.external('https://github.com/JudoxYT/folio/releases/latest')}>Downloaden</button>}
+      <button className="vs-icon-btn" title="Later" onClick={() => setHidden(true)}>✕</button>
     </div>
   );
 }

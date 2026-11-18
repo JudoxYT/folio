@@ -14,3 +14,4 @@ export * from './legacy.js';
 export * from './starter.js';
 export * from './i18n.js';
 export * from './templates.js';
+export * from './links.js';

@@ -35,8 +35,11 @@ import {
   selectSimilar,
   toggleLockSelection,
   zoomToSelection,
+  toggleSplit,
 } from './store';
 import { Modal, Row, Text } from './ui';
+import { runLinkCheck } from './dialog';
+import { toggleGrid } from './Grid';
 
 // ── Rechtsklikmenu ───────────────────────────────────────────
 export function ContextMenu() {
@@ -240,6 +243,9 @@ export function CommandPalette() {
       { group: 'Venster', label: 'Formulierinzendingen', run: () => patchState({ modal: 'inbox' }) },
       { group: 'Venster', label: 'Versiegeschiedenis', run: () => patchState({ modal: 'history' }) },
       { group: 'Venster', label: 'Zoeken en vervangen', run: () => patchState({ modal: 'find' }) },
+      { group: 'Venster', label: 'Links controleren', run: () => void runLinkCheck() },
+      { group: 'Weergave', label: 'Kolommenraster aan/uit', run: toggleGrid },
+      { group: 'Weergave', label: 'Mobiel en desktop naast elkaar', run: toggleSplit },
       { group: 'Venster', label: 'Sneltoetsen', run: () => patchState({ modal: 'shortcuts' }) },
       { group: 'Weergave', label: 'Desktop', run: go('desktop') },
       { group: 'Weergave', label: 'Tablet', run: go('tablet') },

@@ -350,14 +350,23 @@ function checkUpdates() {
   // Op Windows installeert hij de update zelf. Op een Mac kan dat alleen met een betaald Apple-certificaat,
   // dus daar tonen we een melding met een downloadlink.
   autoUpdater.autoDownload = !isMac;
+  // Laatste updatestatus onthouden: elk nieuw geladen scherm (startscherm of Studio) krijgt hem opnieuw.
+  let status = null;
+  const send = () => { if (status && win && !win.isDestroyed()) win.webContents.send('folio:update', status); };
   autoUpdater.on('update-available', (info) => {
-    if (win && !win.isDestroyed()) win.webContents.send('folio:update', { version: info.version, mac: isMac });
+    if (status?.ready) return;
+    status = { version: info.version, mac: isMac };
+    send();
   });
   autoUpdater.on('update-downloaded', (info) => {
-    if (win && !win.isDestroyed()) win.webContents.send('folio:update', { version: info.version, ready: true });
+    status = { version: info.version, ready: true };
+    send();
   });
   autoUpdater.on('error', () => { /* offline of geen release: geen probleem */ });
+  if (win) win.webContents.on('did-finish-load', send);
   void autoUpdater.checkForUpdates().catch(() => {});
+  // Elk uur opnieuw kijken, zodat je ook een melding krijgt als Folio de hele dag open staat.
+  setInterval(() => { if (!status?.ready) void autoUpdater.checkForUpdates().catch(() => {}); }, 60 * 60 * 1000).unref?.();
   ipcMain.handle('folio:install-update', async () => {
     await stopServer();
     autoUpdater.quitAndInstall();

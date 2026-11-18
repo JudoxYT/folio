@@ -492,3 +492,50 @@ export function preloadFonts(theme: Theme): string[] {
   }
   return [...new Set(urls)];
 }
+
+// ── Licht/donker voor bezoekers ──────────────────────────────
+function luminance(hex: string): number {
+  const m = /^#?([0-9a-f]{6})/i.exec(hex.trim());
+  if (!m) return 0.5;
+  const n = parseInt(m[1], 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+/** Het kleurenschema voor de "andere" modus: het meest tegengestelde schema (accent telt niet mee). */
+export function altSchemeKey(theme: Theme, pick?: string): string | null {
+  if (pick && theme.schemes[pick] && pick !== theme.defaultScheme) return pick;
+  const def = theme.schemes[theme.defaultScheme];
+  if (!def) return null;
+  const l0 = luminance(themeColor(def.bg) ?? "");
+  let best: string | null = null;
+  let diff = 0.25;
+  for (const [k, s] of Object.entries(theme.schemes)) {
+    if (k === theme.defaultScheme || k === 'accent') continue;
+    const d = Math.abs(luminance(themeColor(s.bg) ?? "") - l0);
+    if (d > diff) { diff = d; best = k; }
+  }
+  return best;
+}
+
+/** CSS voor de andere modus: alles behalve accentblokken krijgt het andere schema. */
+export function colorModeCss(theme: Theme, altKey: string): string {
+  const alt = theme.schemes[altKey];
+  if (!alt) return '';
+  const v = schemeVars(alt);
+  const others = Object.keys(theme.schemes).filter((k) => k !== 'accent').map((k) => `html[data-mode=alt] .sc-${k}`);
+  return [
+    `html[data-mode=alt]{${v}}`,
+    `html[data-mode=alt] body{background:var(--bg);color:var(--text)}`,
+    others.length ? `${others.join(',')}{${v};background-color:var(--bg);color:var(--text)}` : '',
+  ].join('\n');
+}
+
+/** Is de standaardmodus donker? (Bepaalt welk icoon de knop toont.) */
+export function themeIsDark(theme: Theme): boolean {
+  const def = theme.schemes[theme.defaultScheme];
+  return def ? luminance(themeColor(def.bg) ?? "") < 0.35 : false;
+}

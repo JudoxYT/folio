@@ -6,6 +6,7 @@ import {
   findParent,
   frame,
   newNode,
+  BREAKPOINT_CANVAS,
   resolveProps,
   uid,
   type Asset,
@@ -89,6 +90,8 @@ interface State {
   renaming: string | null;
   /** Alt ingedrukt: afstanden meten (zoals Figma). */
   measuring: boolean;
+  /** Tweede bord ernaast (mobiel bij desktop, anders desktop). */
+  split: boolean;
 }
 
 export const useStore = create<State>(() => ({
@@ -122,6 +125,7 @@ export const useStore = create<State>(() => ({
   palette: false,
   renaming: null,
   measuring: false,
+  split: (() => { try { return localStorage.getItem('vs-split') === '1'; } catch { return false; } })(),
 }));
 
 const get = useStore.getState;
@@ -1140,4 +1144,52 @@ export async function uploadAndInsert(files: File[], targetId?: string | null) {
       toast(`${file.name}: ${(e as Error).message}`, 'error');
     }
   }
+}
+
+// ── Geschiedenispaneel (0.1.3) ───────────────────────────────
+const STEP_NAMES: Record<string, string> = {
+  insert: 'Toegevoegd', delete: 'Verwijderd', paste: 'Geplakt', duplicate: 'Gedupliceerd', drag: 'Verplaatst', move: 'Verplaatst',
+  nudge: 'Verschoven', resize: 'Formaat aangepast', size: 'Formaat aangepast', scale: 'Geschaald', rotate: 'Gedraaid', flip: 'Gespiegeld',
+  'reset-transform': 'Transformatie gewist', order: 'Volgorde', 'order-edge': 'Volgorde', wrap: 'In frame gezet', unwrap: 'Frame opgeheven',
+  hidden: 'Zichtbaarheid', hide: 'Zichtbaarheid', lock: 'Vergrendeld', 'font-size': 'Lettergrootte', spacing: 'Tekstafstand',
+  'paste-style': 'Stijl geplakt', 'style-ref': 'Gedeelde stijl', replace: 'Zoeken en vervangen', section: 'Sectie ingevoegd',
+  component: 'Component', restore: 'Hersteld', reset: 'Teruggezet', resetbp: 'Schermformaat teruggezet', i: 'Vertaling',
+};
+const FIELD_NAMES: Record<string, string> = { content: 'Tekst', label: 'Knoptekst', name: 'Hernoemd', asset: 'Afbeelding', href: 'Link', effects: 'Effecten', alt: 'Alt-tekst' };
+const PROP_NAMES: Record<string, string> = { layout: 'Indeling', size: 'Formaat', position: 'Positie', style: 'Stijl' };
+
+/** Leesbare naam van een stap in de geschiedenis. */
+export function stepName(label: string): string {
+  const [kind, id, rest] = label.split(':');
+  if (kind === 'field') return FIELD_NAMES[rest] ?? 'Eigenschap';
+  if (kind === 'prop') {
+    const [section, key] = (rest ?? '').split('.');
+    if (key === 'fontSize') return 'Lettergrootte';
+    if (key === 'fill' || key === 'color') return 'Kleur';
+    return PROP_NAMES[section] ?? 'Eigenschap';
+  }
+  void id;
+  return STEP_NAMES[kind] ?? 'Wijziging';
+}
+
+/** Spring naar een punt in de geschiedenis: `n` = aantal stappen dat moet blijven staan. */
+export function jumpHistory(n: number) {
+  let guard = 400;
+  while (get().past.length > n && guard--) undo();
+  while (get().past.length < n && get().future.length && guard--) redo();
+}
+
+/** Mobiel en desktop naast elkaar aan/uit. */
+export function toggleSplit() {
+  const split = !get().split;
+  set({ split });
+  // Aanzetten: zo ver uitzoomen dat beide borden in beeld passen.
+  if (split) {
+    const { bp } = get();
+    const avail = (document.querySelector('.vs-center')?.clientWidth ?? 1200) - 240;
+    const main = BREAKPOINT_CANVAS[bp];
+    const alt = bp === 'desktop' ? BREAKPOINT_CANVAS.mobile : BREAKPOINT_CANVAS.desktop * 0.4;
+    set({ zoom: Math.max(0.1, Math.min(1, Math.floor((avail / (main + alt)) * 100) / 100)) });
+  }
+  try { localStorage.setItem('vs-split', split ? '1' : '0'); } catch { /* geen opslag */ }
 }
