@@ -1,5 +1,5 @@
 # Bouwt Folio voor Windows en Mac en zet de installers in een GitHub-release.
-# Starten: maak een tag als `folio-v0.1.0` (of klik op "Run workflow" onder Actions).
+# Nieuwe versie: verhoog "version" in apps/desktop/package.json en klik op "Run workflow" onder Actions.
 name: Folio uitbrengen
 
 on:
@@ -11,7 +11,25 @@ permissions:
   contents: write
 
 jobs:
+  voorbereiden:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: echo "tag=v$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Concept-release klaarzetten
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ steps.v.outputs.tag }}
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "Release $TAG bestaat al"; else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Folio ${TAG#v}" --notes "Download hieronder: **Folio-Setup-${TAG#v}.exe** voor Windows, **Folio-${TAG#v}-arm64.dmg** voor Macs met Apple-chip (M1 en nieuwer), **Folio-${TAG#v}.dmg** voor Intel-Macs. Uitleg: zie INSTALLEREN.md."
+          fi
+
   build:
+    needs: voorbereiden
     strategy:
       fail-fast: false
       matrix:
@@ -20,7 +38,7 @@ jobs:
             args: --win --x64
           - os: macos-latest      # Apple-chips (M1 en nieuwer)
             args: --mac --arm64
-          - os: macos-13          # Intel-Macs
+          - os: macos-15-intel    # Intel-Macs
             args: --mac --x64
     runs-on: ${{ matrix.os }}
     steps:
@@ -36,9 +54,19 @@ jobs:
       - name: Bundelen
         working-directory: apps/desktop
         run: node scripts/bundle.mjs
-      - name: Installer bouwen en uitbrengen
+      - name: Installer bouwen en uploaden
         working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npx electron-builder ${{ matrix.args }} --publish always
+
+  uitbrengen:
+    needs: [voorbereiden, build]
+    if: ${{ !cancelled() && needs.voorbereiden.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release openbaar maken
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.voorbereiden.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false --latest
