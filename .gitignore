@@ -1,0 +1,12 @@
+node_modules/
+data/
+apps/studio/dist/
+.env
+*.log
+apps/desktop/app/
+apps/desktop/release/
+.env
+**/node_modules/
+*.db
+*.db-*
+.claude-tmp/

@@ -1,0 +1,22 @@
+services:
+  vystara:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"   # alleen lokaal; naar buiten via de tunnel
+    volumes:
+      - ./data:/data            # database, uploads en de gepubliceerde site
+    env_file: .env
+
+  # Cloudflare Tunnel: maakt de Studio bereikbaar zonder open poorten.
+  # Maak een tunnel in het Cloudflare-dashboard (Zero Trust → Networks → Tunnels)
+  # en zet de token in .env als TUNNEL_TOKEN. Wijs de hostname naar http://vystara:8787
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - vystara
+    profiles: ["tunnel"]

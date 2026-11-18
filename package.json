@@ -1,0 +1,28 @@
+{
+  "name": "vystara-platform",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/server",
+    "apps/studio"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,studio -c blue,magenta \"npm run dev -w @vystara/server\" \"npm run dev -w @vystara/studio\"",
+    "build": "npm run build -w @vystara/studio",
+    "start": "npm run start -w @vystara/server",
+    "app": "node app.mjs",
+    "typecheck": "tsc -p packages/core && tsc -p apps/server && tsc -p apps/studio",
+    "desktop": "npm --prefix apps/desktop start",
+    "desktop:dist": "npm --prefix apps/desktop run dist"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "optionalDependencies": {
+    "cloudflared": "^0.7.3"
+  }
+}

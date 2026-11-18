@@ -1,0 +1,44 @@
+# Bouwt Folio voor Windows en Mac en zet de installers in een GitHub-release.
+# Starten: maak een tag als `folio-v0.1.0` (of klik op "Run workflow" onder Actions).
+name: Folio uitbrengen
+
+on:
+  push:
+    tags: ['folio-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --win --x64
+          - os: macos-latest      # Apple-chips (M1 en nieuwer)
+            args: --mac --arm64
+          - os: macos-13          # Intel-Macs
+            args: --mac --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Studio en server installeren
+        run: npm ci --no-audit --no-fund
+      - name: Desktop-app installeren
+        working-directory: apps/desktop
+        run: npm ci --no-audit --no-fund
+      - name: Bundelen
+        working-directory: apps/desktop
+        run: node scripts/bundle.mjs
+      - name: Installer bouwen en uitbrengen
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder ${{ matrix.args }} --publish always
