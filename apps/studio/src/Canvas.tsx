@@ -34,7 +34,7 @@ import {
   withSharedStyle,
   localText,
 } from '@vystara/core';
-import { mutate, select, useStore, setField, openDoc, moveNode, selectedIds, setRotation, setTranslation } from './store';
+import { mutate, select, useStore, setField, openDoc, moveNode, selectedIds, setRotation, setTranslation, duplicateSelection, uploadAndInsert } from './store';
 
 export interface RenderCtx {
   bp: Breakpoint;
@@ -283,6 +283,8 @@ function TextEditor({ node, style, className, lang }: { node: Extract<VNode, { t
         style={style}
         contentEditable="plaintext-only"
         suppressContentEditableWarning
+        spellCheck
+        lang={lang ?? useStore.getState().site?.seo?.lang ?? 'nl'}
         onInput={place}
         onBlur={(e) => {
           if (bar.current && e.relatedTarget && bar.current.contains(e.relatedTarget as Node)) return;
@@ -470,10 +472,24 @@ export function Canvas() {
     id: string; x0: number; y0: number; x: number; y: number; ax: string; ay: string;
     /** Voor slim uitlijnen: eigen maat, maat van de ouder, en randen van broertjes (CSS-px binnen de ouder). */
     w: number; h: number; pw: number; ph: number; xs: number[]; ys: number[]; pr: DOMRect | null;
+    /** Alt+slepen: bij de eerste beweging een kopie maken en die slepen. */
+    dup?: boolean;
   } | null>(null);
   const [guides, setGuides] = useState<{ v: number[]; h: number[]; box: { left: number; top: number; width: number; height: number } } | null>(null);
   const pan = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
+  const [fileOver, setFileOver] = useState(false);
+  // Alt ingedrukt = afstanden meten (zoals Figma). Losgelaten merken we ook via de muis (altKey).
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === 'Alt') setMeasuring(true); else if (!e.altKey) setMeasuring(false); };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Alt') setMeasuring(false); };
+    const blur = () => setMeasuring(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); };
+  }, []);
   const [panning, setPanning] = useState(false);
 
   // Spatie ingedrukt houden = canvas verslepen (zoals in Figma/Photoshop).
@@ -513,7 +529,7 @@ export function Canvas() {
     return () => vp.removeEventListener('wheel', onWheel);
   });
   // Lagen in auto layout herschikken door te slepen.
-  const reorder = useRef<{ id: string; x0: number; y0: number; active: boolean; target: string | null; where: 'before' | 'after' } | null>(null);
+  const reorder = useRef<{ id: string; x0: number; y0: number; active: boolean; target: string | null; where: 'before' | 'after'; dup?: boolean } | null>(null);
   // Formaat en rotatie aanpassen met handvatten (zoals in Adobe-apps), via window-luisteraars
   // zodat slepen ook buiten het canvas doorgaat.
   const startTransform = (e: React.MouseEvent, mode: 'resize' | 'rotate', edge?: Edge) => {
@@ -678,6 +694,7 @@ export function Canvas() {
       ref={viewport}
       data-space={spaceDown || undefined}
       data-panning={panning || undefined}
+      data-file-over={fileOver || undefined}
       onMouseDown={(e) => {
         if (e.button === 1 || (e.button === 0 && spaceDown)) {
           e.preventDefault();
@@ -727,29 +744,38 @@ export function Canvas() {
             id, x0: e.clientX, y0: e.clientY, x: pos.x ?? 0, y: pos.y ?? 0, ax: pos.anchorX ?? 'left', ay: pos.anchorY ?? 'top',
             w: el?.offsetWidth ?? 0, h: el?.offsetHeight ?? 0, pw: par?.clientWidth ?? 0, ph: par?.clientHeight ?? 0, xs, ys,
             pr: par && pos.mode === 'absolute' ? par.getBoundingClientRect() : null,
+            dup: e.altKey,
           };
         } else if (bp === 'desktop') {
           // Zoals Figma Sites: structuur alleen wijzigen op het hoofd-breakpoint.
-          reorder.current = { id, x0: e.clientX, y0: e.clientY, active: false, target: null, where: 'after' };
+          reorder.current = { id, x0: e.clientX, y0: e.clientY, active: false, target: null, where: 'after', dup: e.altKey };
         }
       }}
       onMouseMove={(e) => {
         const ro = reorder.current;
         if (ro && e.buttons === 1 && tree) {
           if (!ro.active && Math.hypot(e.clientX - ro.x0, e.clientY - ro.y0) < 6) return;
+          if (!ro.active && ro.dup) {
+            duplicateSelection();
+            ro.id = useStore.getState().selection ?? ro.id;
+            ro.dup = false;
+          }
           ro.active = true;
           // Zoek de laag onder de muis (behalve wat je sleept).
+          // Na Alt+slepen bestaat de kopie nog niet in de 'tree' van deze render: lees de actuele.
+          const cur = useStore.getState().tree ?? tree;
+          const dragged = findNode(cur, ro.id);
           const under = document.elementsFromPoint(e.clientX, e.clientY).find((el) => {
             const id = (el as HTMLElement).dataset?.id;
-            return id && !findNode(findNode(tree, ro.id)!, sourceId(id));
+            return id && (!dragged || !findNode(dragged, sourceId(id)));
           }) as HTMLElement | undefined;
           const tid = under ? sourceId(under.dataset.id!) : null;
-          if (!tid || tid === tree.id) {
+          if (!tid || tid === cur.id) {
             ro.target = null;
             setDropLine(null);
             return;
           }
-          const parent = findParent(tree, tid);
+          const parent = findParent(cur, tid);
           const pmode = parent ? (resolveProps(parent.parent, bp).layout?.mode ?? 'vertical') : 'vertical';
           const r = under!.getBoundingClientRect();
           const horiz = pmode === 'horizontal';
@@ -773,6 +799,12 @@ export function Canvas() {
           return;
         }
         const d = drag.current;
+        if (d && e.buttons === 1 && d.dup) {
+          if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 3) return;
+          duplicateSelection();
+          d.id = useStore.getState().selection ?? d.id;
+          d.dup = false;
+        }
         if (d && e.buttons === 1) {
           const dx = Math.round((e.clientX - d.x0) / zoom);
           const dy = Math.round((e.clientY - d.y0) / zoom);
@@ -819,6 +851,7 @@ export function Canvas() {
         const raw = idAt(e.target);
         const h = raw ? sourceId(raw) : null;
         if (h !== useStore.getState().hover) useStore.setState({ hover: h });
+        if (e.altKey !== measuring) setMeasuring(e.altKey);
       }}
       onMouseUp={() => {
         if (pan.current) { pan.current = null; setPanning(false); return; }
@@ -846,7 +879,26 @@ export function Canvas() {
         if (n?.type === 'text') useStore.setState({ editingText: n.id, selection: n.id });
         else if (n?.type === 'instance' && n.component) void openDoc({ kind: 'component', id: n.component });
       }}
+      onDragOver={(e) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (!fileOver) setFileOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setFileOver(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setFileOver(false);
+        // Op een laag gelaten: daar(in/na) invoegen.
+        const under = document.elementsFromPoint(e.clientX, e.clientY).find((el) => (el as HTMLElement).dataset?.id) as HTMLElement | undefined;
+        void uploadAndInsert(Array.from(e.dataTransfer.files), under ? sourceId(under.dataset.id!) : undefined);
+      }}
       onContextMenu={(e) => {
+        // Tijdens tekst bewerken: het normale menu (met spellingssuggesties).
+        if (editingText && (e.target as HTMLElement).closest('[contenteditable]')) return;
         const raw = idAt(e.target);
         e.preventDefault();
         const id = raw ? sourceId(raw) : null;
@@ -892,8 +944,46 @@ export function Canvas() {
           )}
         </div>
       )}
+      {measuring && rects.sel && rects.hov && !editingText && <Measure a={rects.sel} b={rects.hov} zoom={zoom} />}
+      {fileOver && <div className="vs-file-over">Loslaten om toe te voegen</div>}
       {hud && <div className="vs-hud" style={{ left: hud.x + 16, top: hud.y + 18 }}>{hud.text}</div>}
     </div>
+  );
+}
+
+/** Afstandslijnen tussen de selectie (a) en de laag onder de muis (b), in CSS-pixels. */
+function Measure({ a, b, zoom }: { a: DOMRect; b: DOMRect; zoom: number }) {
+  const lines: { x: number; y: number; w: number; h: number; label: number }[] = [];
+  const px = (v: number) => Math.round(v / zoom);
+  const contains = (o: DOMRect, i: DOMRect) => o.left <= i.left + 0.5 && o.top <= i.top + 0.5 && o.right >= i.right - 0.5 && o.bottom >= i.bottom - 0.5;
+  if (contains(b, a) || contains(a, b)) {
+    // Binnen elkaar: afstand van de binnenste naar alle randen van de buitenste.
+    const [o, i] = contains(b, a) ? [b, a] : [a, b];
+    const cy = i.top + i.height / 2;
+    const cx = i.left + i.width / 2;
+    if (i.left - o.left > 0.5) lines.push({ x: o.left, y: cy, w: i.left - o.left, h: 0, label: px(i.left - o.left) });
+    if (o.right - i.right > 0.5) lines.push({ x: i.right, y: cy, w: o.right - i.right, h: 0, label: px(o.right - i.right) });
+    if (i.top - o.top > 0.5) lines.push({ x: cx, y: o.top, w: 0, h: i.top - o.top, label: px(i.top - o.top) });
+    if (o.bottom - i.bottom > 0.5) lines.push({ x: cx, y: i.bottom, w: 0, h: o.bottom - i.bottom, label: px(o.bottom - i.bottom) });
+  } else {
+    const oy = [Math.max(a.top, b.top), Math.min(a.bottom, b.bottom)];
+    const ox = [Math.max(a.left, b.left), Math.min(a.right, b.right)];
+    const y = oy[0] < oy[1] ? (oy[0] + oy[1]) / 2 : a.top + a.height / 2;
+    const x = ox[0] < ox[1] ? (ox[0] + ox[1]) / 2 : a.left + a.width / 2;
+    if (a.right <= b.left) lines.push({ x: a.right, y, w: b.left - a.right, h: 0, label: px(b.left - a.right) });
+    else if (b.right <= a.left) lines.push({ x: b.right, y, w: a.left - b.right, h: 0, label: px(a.left - b.right) });
+    if (a.bottom <= b.top) lines.push({ x, y: a.bottom, w: 0, h: b.top - a.bottom, label: px(b.top - a.bottom) });
+    else if (b.bottom <= a.top) lines.push({ x, y: b.bottom, w: 0, h: a.top - b.bottom, label: px(a.top - b.bottom) });
+  }
+  return (
+    <>
+      <div className="vs-outline vs-measure-box" style={box(b)} />
+      {lines.map((l, i) => (
+        <div key={i} className={`vs-measure ${l.w ? 'h' : 'v'}`} style={{ left: l.x, top: l.y, width: l.w || 1, height: l.h || 1 }}>
+          <span>{l.label}</span>
+        </div>
+      ))}
+    </>
   );
 }
 

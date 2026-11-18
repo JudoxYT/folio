@@ -21,6 +21,7 @@ import {
 import { api } from './api';
 import { patchState, saveSite, toast, useStore } from './store';
 import { ColorField, Num, Row, Select, Text, Toggle } from './ui';
+import { askText } from './dialog';
 
 type Tab = 'gallery' | 'colors' | 'type' | 'buttons' | 'fonts';
 
@@ -53,7 +54,7 @@ export function ThemeModal() {
     }
   };
   const saveAs = async () => {
-    const name = prompt('Naam van je thema', draft.name.endsWith('(eigen)') ? draft.name : `${draft.name} (eigen)`);
+    const name = await askText('Naam van je thema', draft.name.endsWith('(eigen)') ? draft.name : `${draft.name} (eigen)`);
     if (!name) return;
     const saved = await api.post<Theme>('/api/themes', { ...draft, name, id: draft.id.startsWith('t_') ? draft.id : undefined });
     patchState({ themes: [saved, ...useStore.getState().themes.filter((t) => t.id !== saved.id)] });

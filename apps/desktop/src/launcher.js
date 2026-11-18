@@ -66,6 +66,7 @@ function menu(site, x, y) {
     item('Openen', () => open(site.id)),
     item('Naam wijzigen…', () => renameDialog(site)),
     item('Dupliceren', async () => { await window.folio.duplicate(site.id); await refresh(); }),
+    item('Delen als bestand…', async () => { try { if (await window.folio.exportSite(site.id)) note('Bestand gemaakt. Stuur het naar wie je wilt; die opent het met Folio.'); } catch (e) { showError(e); } }),
     item(state.platform === 'darwin' ? 'Toon in Finder' : 'Toon in Verkenner', () => window.folio.reveal(site.id)),
     item('Verwijderen…', () => removeDialog(site), 'danger'));
   document.body.append(m);
@@ -158,6 +159,15 @@ async function refresh() {
 
 $('#new').addEventListener('click', newDialog);
 $('#import').addEventListener('click', async () => { if (await window.folio.importSite()) await refresh(); });
+$('#import-file').addEventListener('click', async () => { const s = await window.folio.importFile(); if (s) { await refresh(); note(`“${s.name}” staat nu tussen je websites.`); } });
+window.folio.onRefresh(async (info) => { await refresh(); if (info?.added) note(`“${info.added}” staat nu tussen je websites.`); });
+
+/** Korte melding onderin. */
+function note(text) {
+  const n = h('div', { class: 'note' }, text);
+  document.body.append(n);
+  setTimeout(() => n.remove(), 4000);
+}
 window.folio.onUpdate((info) => {
   const b = $('#update');
   b.hidden = false;

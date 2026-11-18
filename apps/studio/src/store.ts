@@ -24,7 +24,8 @@ import {
   type SharedStyle,
   siteTheme,
 } from '@vystara/core';
-import { api, type Bootstrap } from './api';
+import { api, uploadFile, type Bootstrap } from './api';
+import { askText } from './dialog';
 
 enablePatches();
 
@@ -74,7 +75,7 @@ interface State {
   past: HistoryEntry[];
   future: HistoryEntry[];
   toast: { text: string; kind: 'info' | 'error' } | null;
-  modal: 'site' | 'history' | 'inbox' | 'theme' | 'hosting' | 'access' | 'save-section' | 'shortcuts' | null;
+  modal: 'site' | 'history' | 'inbox' | 'theme' | 'hosting' | 'access' | 'save-section' | 'shortcuts' | 'find' | null;
   unread: number;
   sections: SavedSection[];
   themes: Theme[];
@@ -84,6 +85,10 @@ interface State {
   lang: string | null;
   menu: { x: number; y: number; id: string | null } | null;
   palette: boolean;
+  /** Laag die nu in het lagenpaneel hernoemd wordt (F2). */
+  renaming: string | null;
+  /** Alt ingedrukt: afstanden meten (zoals Figma). */
+  measuring: boolean;
 }
 
 export const useStore = create<State>(() => ({
@@ -115,6 +120,8 @@ export const useStore = create<State>(() => ({
   lang: null,
   menu: null,
   palette: false,
+  renaming: null,
+  measuring: false,
 }));
 
 const get = useStore.getState;
@@ -798,7 +805,7 @@ export async function createVariant(compId: string) {
   const c = comps.find((x) => x.id === compId);
   if (!c) return;
   const set = variantSet(c.name);
-  const label = prompt(`Naam van de nieuwe variant van "${set}"`, 'Variant ' + (comps.filter((x) => variantSet(x.name) === set).length + 1));
+  const label = await askText(`Naam van de nieuwe variant van "${set}"`, 'Variant ' + (comps.filter((x) => variantSet(x.name) === set).length + 1), 'Maken');
   if (!label?.trim()) return;
   if (!c.name.includes(' / ')) {
     const renamed = await api.put<Component>(`/api/components/${c.id}`, { ...c, name: `${set} / Standaard` });
@@ -975,4 +982,162 @@ export function nudgePosition(dx: number, dy: number) {
     pos.y = (pos.y ?? 0) + (pos.anchorY === 'bottom' ? -dy : dy);
     t.position = pos;
   });
+}
+
+// ── Extra sneltoetsen (0.1.2) ────────────────────────────────
+/** Tab / Shift+Tab: naar de volgende of vorige laag op hetzelfde niveau. */
+export function selectSibling(dir: 1 | -1) {
+  const { tree, selection } = get();
+  if (!tree) return;
+  if (!selection || selection === tree.id) {
+    if (tree.children[0]) select(tree.children[0].id);
+    return;
+  }
+  const p = findParent(tree, selection);
+  if (!p) return;
+  const kids = p.parent.children!;
+  select(kids[(p.index + dir + kids.length) % kids.length].id);
+}
+
+/** Shift+Enter: naar de ouder. */
+export function selectParentLayer() {
+  const { tree, selection } = get();
+  if (!tree || !selection) return;
+  const p = findParent(tree, selection);
+  if (p) select(p.parent.id);
+}
+
+/** Ctrl+Shift+L: vergrendelen aan/uit voor de hele selectie. */
+export function toggleLockSelection() {
+  const { tree } = get();
+  const ids = selectedIds();
+  if (!tree || !ids.length) return;
+  const lock = !ids.every((id) => findNode(tree, id)?.locked);
+  mutate('lock', (t) => {
+    for (const id of ids) {
+      const n = findNode(t, id);
+      if (n) n.locked = lock || undefined;
+    }
+  });
+  toast(lock ? 'Vergrendeld' : 'Ontgrendeld');
+}
+
+/** Ctrl+Shift+H: verbergen aan/uit voor de hele selectie (per schermformaat). */
+export function toggleHideSelection() {
+  const { tree, bp } = get();
+  const ids = selectedIds();
+  if (!tree || !ids.length) return;
+  const isHidden = (n: VNode) => (bp === 'desktop' ? !!n.hidden : (n.responsive?.[bp]?.hidden ?? n.hidden) === true);
+  const hide = !ids.every((id) => { const n = findNode(tree, id); return n && isHidden(n); });
+  for (const id of ids) setHidden(id, hide);
+}
+
+/** Alt+←/→ letterafstand, Alt+↑/↓ regelhoogte (bij tekst). */
+export function nudgeTextSpacing(kind: 'letterSpacing' | 'lineHeight', delta: number) {
+  editTargets(`spacing:${kind}`, (t, n) => {
+    if (n.type !== 'text' && n.type !== 'button') return;
+    const cur = resolveProps(n, get().bp).style?.[kind];
+    let base = typeof cur === 'number' ? cur : undefined;
+    if (base === undefined) {
+      const el = document.querySelector(`.vs-board [data-id="${CSS.escape(n.id)}"]`) as HTMLElement | null;
+      const cs = el ? getComputedStyle(el) : null;
+      const fs = cs ? parseFloat(cs.fontSize) || 16 : 16;
+      if (kind === 'letterSpacing') base = cs && cs.letterSpacing !== 'normal' ? parseFloat(cs.letterSpacing) / fs : 0;
+      else base = cs && cs.lineHeight !== 'normal' ? parseFloat(cs.lineHeight) / fs : 1.4;
+    }
+    const v = Math.round((base + delta) * 1000) / 1000;
+    t.style = { ...(t.style ?? {}), [kind]: kind === 'lineHeight' ? Math.max(0.5, Math.min(4, v)) : Math.max(-0.2, Math.min(1, v)) };
+  });
+}
+
+/** Ctrl+pijltjes: breedte/hoogte per pixel aanpassen. */
+export function nudgeSize(dw: number, dh: number) {
+  editTargets('size', (t, n) => {
+    const el = document.querySelector(`.vs-board [data-id="${CSS.escape(n.id)}"]`) as HTMLElement | null;
+    const cur = { ...(resolveProps(n, get().bp).size ?? {}), ...(t.size ?? {}) };
+    const w0 = cur.width === 'fixed' && cur.w ? cur.w : el?.offsetWidth ?? 0;
+    const h0 = cur.height === 'fixed' && cur.h ? cur.h : el?.offsetHeight ?? 0;
+    const size = { ...cur };
+    if (dw) Object.assign(size, { width: 'fixed', w: Math.max(1, Math.round(w0 + dw)) });
+    if (dh && !cur.aspectRatio) Object.assign(size, { height: 'fixed', h: Math.max(1, Math.round(h0 + dh)) });
+    t.size = size;
+  });
+}
+
+/** Shift+2: inzoomen op de selectie. */
+export function zoomToSelection() {
+  const { selection, zoom } = get();
+  const vp = document.querySelector('.vs-viewport') as HTMLElement | null;
+  const el = selection ? (vp?.querySelector(`[data-id="${CSS.escape(selection)}"]`) as HTMLElement | null) : null;
+  if (!vp || !el) return;
+  const r0 = el.getBoundingClientRect();
+  const w = r0.width / zoom;
+  const h = r0.height / zoom;
+  if (!w || !h) return;
+  const z = Math.max(0.1, Math.min(3, Math.floor(Math.min((vp.clientWidth - 160) / w, (vp.clientHeight - 160) / h) * 100) / 100));
+  set({ zoom: z });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const r = el.getBoundingClientRect();
+    const v = vp.getBoundingClientRect();
+    vp.scrollLeft += r.left + r.width / 2 - (v.left + v.width / 2);
+    vp.scrollTop += r.top + r.height / 2 - (v.top + v.height / 2);
+  }));
+}
+
+/** Alles selecteren wat op de selectie lijkt: zelfde type en tekststijl/knopvariant/gedeelde stijl. */
+export function selectSimilar() {
+  const { tree, selection } = get();
+  const n = tree && selection ? findNode(tree, selection) : null;
+  if (!tree || !n) return;
+  const key = (x: VNode) => {
+    const r = x as VNode & { textStyle?: string; variant?: string; styleRef?: string; component?: string };
+    if (r.styleRef) return `ref:${r.styleRef}`;
+    if (x.type === 'text') return `text:${r.textStyle ?? ''}`;
+    if (x.type === 'button') return `button:${r.variant ?? ''}`;
+    if (x.type === 'instance') return `inst:${r.component ?? ''}`;
+    return x.type;
+  };
+  const k = key(n);
+  const hits: string[] = [];
+  const walk = (x: VNode) => {
+    if (x.id !== tree.id && key(x) === k) hits.push(x.id);
+    for (const c of x.children ?? []) walk(c);
+  };
+  walk(tree);
+  const rest = hits.filter((id) => id !== n.id);
+  set({ selection: n.id, extra: rest, editingText: null });
+  toast(`${hits.length} vergelijkbare ${hits.length === 1 ? 'laag' : 'lagen'} geselecteerd`);
+}
+
+/** Bestanden (geplakt of op het canvas gesleept) uploaden en als afbeelding/video invoegen. */
+export async function uploadAndInsert(files: File[], targetId?: string | null) {
+  const media = files.filter((f) => /^(image|video)\//.test(f.type) || /\.(heic|heif|svg|mkv|avi|mov|webm)$/i.test(f.name));
+  if (!media.length) {
+    if (files.length) toast('Alleen afbeeldingen en video’s kun je op het canvas zetten. Andere bestanden kun je bij Assets uploaden.', 'error');
+    return;
+  }
+  if (targetId !== undefined) select(targetId);
+  for (const f of media) {
+    // Een geplakte screenshot heet altijd "image.png": geef hem een herkenbare naam.
+    const file = f.name === 'image.png' || !f.name ? new File([f], `screenshot-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.png`, { type: f.type }) : f;
+    toast(`${file.name} uploaden…`);
+    try {
+      const a = await uploadFile(file);
+      await refreshAssets();
+      const sel = selected();
+      // Een lege afbeelding/video geselecteerd? Dan vullen we die, anders komt er een nieuwe laag.
+      if (sel && (sel.type === 'image' || sel.type === 'video') && !(sel as { asset?: string }).asset && sel.type === a.kind) {
+        setField(sel.id, 'asset', a.id);
+        continue;
+      }
+      if (a.kind !== 'image' && a.kind !== 'video') continue;
+      const node = newNode(a.kind) as Extract<VNode, { type: 'image' | 'video' }>;
+      node.asset = a.id;
+      node.name = a.originalName.replace(/\.[^.]+$/, '');
+      if (a.width && a.height) node.size = { width: 'fill', maxW: a.width, aspectRatio: `${a.width} / ${a.height}` };
+      insertNode(node);
+    } catch (e) {
+      toast(`${file.name}: ${(e as Error).message}`, 'error');
+    }
+  }
 }

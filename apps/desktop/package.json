@@ -1,7 +1,7 @@
 {
   "name": "folio",
   "productName": "Folio",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Bouw en publiceer je eigen website, zonder te programmeren.",
   "author": "Folio",
   "license": "UNLICENSED",
@@ -94,7 +94,15 @@
       ],
       "category": "Graphics",
       "icon": "build/icon.png"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": "folio",
+        "name": "Folio-website",
+        "description": "Folio-website",
+        "role": "Editor"
+      }
+    ]
   },
   "repository": {
     "type": "git",

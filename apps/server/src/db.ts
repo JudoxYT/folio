@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import Database from './sqlite.js';
 import {
   DEFAULT_SITE,
@@ -381,3 +383,26 @@ export function transaction(fn: () => void) {
 export function hasEdits(): boolean {
   return (db.prepare('SELECT COUNT(*) AS n FROM revisions').get() as { n: number }).n > 0;
 }
+
+// ── Automatische back-up: één per dag, de laatste 7 blijven bewaard ──
+const BACKUP_KEEP = 7;
+export function dailyBackup() {
+  try {
+    const dir = path.join(config.dataDir, 'backup');
+    fs.mkdirSync(dir, { recursive: true });
+    const base = path.basename(paths.db, '.db');
+    const day = new Date().toISOString().slice(0, 10);
+    const file = path.join(dir, `${base}-${day}.db`);
+    if (!fs.existsSync(file)) {
+      // VACUUM INTO maakt een complete, consistente kopie terwijl de site gewoon draait.
+      db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+    }
+    const re = new RegExp(`^${base}-\\d{4}-\\d{2}-\\d{2}\\.db$`);
+    const old = fs.readdirSync(dir).filter((f) => re.test(f)).sort().reverse().slice(BACKUP_KEEP);
+    for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
+  } catch (e) {
+    console.error('Back-up maken mislukt:', (e as Error).message);
+  }
+}
+dailyBackup();
+setInterval(dailyBackup, 6 * 60 * 60 * 1000).unref();

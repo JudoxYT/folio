@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const crypto = require('node:crypto');
 const { fork } = require('node:child_process');
+const { writeZip, readZip } = require('./zip.cjs');
 
 const isMac = process.platform === 'darwin';
 const APP_DIR = path.join(__dirname, '..', 'app');
@@ -94,7 +95,13 @@ function stopServer() {
       clearTimeout(done);
       resolve();
     });
-    try { child.kill('SIGTERM'); } catch { resolve(); }
+    // Eerst netjes vragen (database wordt dan goed afgesloten), daarna pas hard stoppen.
+    try {
+      if (child.connected) child.send({ type: 'shutdown' });
+      else child.kill('SIGTERM');
+    } catch {
+      try { child.kill('SIGTERM'); } catch { resolve(); }
+    }
   });
 }
 
@@ -196,6 +203,24 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
   guard(win.webContents);
+  // Spellingscontrole in het Nederlands en Engels, met suggesties in het rechtsklikmenu.
+  try { win.webContents.session.setSpellCheckerLanguages(['nl', 'en-US']); } catch { /* macOS kiest zelf */ }
+  win.webContents.on('context-menu', (_e, p) => {
+    if (!p.isEditable) return;
+    const items = [];
+    for (const w of p.dictionarySuggestions.slice(0, 6)) items.push({ label: w, click: () => win.webContents.replaceMisspelling(w) });
+    if (p.misspelledWord) {
+      if (!items.length) items.push({ label: 'Geen suggesties', enabled: false });
+      items.push({ label: 'Aan woordenboek toevoegen', click: () => win.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) });
+      items.push({ type: 'separator' });
+    }
+    items.push({ role: 'cut', label: 'Knippen' }, { role: 'copy', label: 'Kopiëren' }, { role: 'paste', label: 'Plakken' }, { type: 'separator' }, { role: 'selectAll', label: 'Alles selecteren' });
+    Menu.buildFromTemplate(items).popup({ window: win });
+  });
+  // Alt loslaten opent op Windows anders de menubalk; in de Studio is Alt voor meten en sneltoetsen.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyUp' && input.key === 'Alt' && running) e.preventDefault();
+  });
   win.on('page-title-updated', (e) => {
     if (running) {
       e.preventDefault();
@@ -302,12 +327,12 @@ ipcMain.handle('folio:external', (_e, url) => {
 
 // ── Menu ─────────────────────────────────────────────────────
 function buildMenu() {
-  const home = { label: 'Mijn websites', accelerator: 'CmdOrCtrl+Shift+H', click: async () => { await stopServer(); showHome(); } };
+  const home = { label: 'Mijn websites', accelerator: 'CmdOrCtrl+Shift+M', click: async () => { await stopServer(); showHome(); } };
   const template = [
     ...(isMac ? [{ label: 'Folio', submenu: [{ role: 'about', label: 'Over Folio' }, { type: 'separator' }, home, { type: 'separator' }, { role: 'hide', label: 'Verberg Folio' }, { role: 'hideOthers', label: 'Verberg andere' }, { type: 'separator' }, { role: 'quit', label: 'Stop Folio' }] }] : []),
     { label: 'Bestand', submenu: [home, { type: 'separator' }, isMac ? { role: 'close', label: 'Sluit venster' } : { role: 'quit', label: 'Afsluiten' }] },
     { label: 'Wijzig', submenu: [{ role: 'undo', label: 'Ongedaan maken' }, { role: 'redo', label: 'Opnieuw' }, { type: 'separator' }, { role: 'cut', label: 'Knippen' }, { role: 'copy', label: 'Kopiëren' }, { role: 'paste', label: 'Plakken' }, { role: 'selectAll', label: 'Alles selecteren' }] },
-    { label: 'Beeld', submenu: [{ role: 'reload', label: 'Opnieuw laden' }, { role: 'togglefullscreen', label: 'Volledig scherm' }, { type: 'separator' }, { role: 'resetZoom', label: 'Werkelijke grootte' }, { role: 'zoomIn', label: 'Inzoomen' }, { role: 'zoomOut', label: 'Uitzoomen' }, { type: 'separator' }, { role: 'toggleDevTools', label: 'Ontwikkelaarstools' }] },
+    { label: 'Beeld', submenu: [{ role: 'reload', label: 'Opnieuw laden', accelerator: 'F5' }, { role: 'togglefullscreen', label: 'Volledig scherm' }, { type: 'separator' }, { role: 'toggleDevTools', label: 'Ontwikkelaarstools' }] },
     { label: 'Help', submenu: [{ label: 'Logbestanden openen', click: () => shell.openPath(LOG_DIR()) }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -333,14 +358,122 @@ function checkUpdates() {
   });
   autoUpdater.on('error', () => { /* offline of geen release: geen probleem */ });
   void autoUpdater.checkForUpdates().catch(() => {});
-  ipcMain.handle('folio:install-update', () => autoUpdater.quitAndInstall());
+  ipcMain.handle('folio:install-update', async () => {
+    await stopServer();
+    autoUpdater.quitAndInstall();
+  });
 }
+
+// ── Website delen als één bestand (.folio) ───────────────────
+/** Database netjes afronden (oude WAL-bestanden opruimen) zodat de kopie compleet is. */
+function settleDb(dir) {
+  const db = path.join(dir, 'site.db');
+  if (!fs.existsSync(db)) return;
+  const wal = `${db}-wal`;
+  if (!fs.existsSync(wal) || fs.statSync(wal).size === 0) return;
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const d = new DatabaseSync(db);
+    d.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    d.close();
+  } catch { /* lukt het niet, dan nemen we de WAL gewoon mee */ }
+}
+
+function listFiles(dir, rel = '') {
+  const out = [];
+  for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    // Niet meedelen: gepubliceerde uitvoer, tijdelijke uploads en back-ups (die maakt Folio opnieuw).
+    if (!rel && ['site', 'tmp-uploads', 'backup'].includes(e.name)) continue;
+    if (e.isDirectory()) out.push(...listFiles(dir, r));
+    else if (e.isFile() && !/\.db-shm$/.test(e.name)) out.push({ name: r, path: path.join(dir, r) });
+  }
+  return out;
+}
+
+async function exportSite(id) {
+  const site = readSites().find((s) => s.id === id);
+  if (!site || !fs.existsSync(site.dir)) throw new Error('De map van deze website is niet gevonden.');
+  if (running && running.site.id === id) await stopServer();
+  const r = await dialog.showSaveDialog(win, {
+    title: 'Website delen als bestand',
+    defaultPath: path.join(app.getPath('desktop'), `${slugify(site.name)}.folio`),
+    filters: [{ name: 'Folio-website', extensions: ['folio'] }],
+  });
+  if (r.canceled || !r.filePath) return null;
+  settleDb(site.dir);
+  const files = listFiles(site.dir);
+  const manifest = { folio: 1, name: site.name, template: site.template, exportedAt: new Date().toISOString(), version: app.getVersion() };
+  writeZip(r.filePath, [{ name: 'folio.json', data: Buffer.from(JSON.stringify(manifest, null, 2)) }, ...files]);
+  shell.showItemInFolder(r.filePath);
+  return r.filePath;
+}
+
+function importFolioFile(file) {
+  const entries = readZip(file);
+  const man = entries.find((e) => e.name === 'folio.json');
+  if (!man || !entries.some((e) => e.name === 'site.db')) throw new Error('Dit is geen Folio-website.');
+  const info = JSON.parse(man.data.toString('utf8'));
+  const name = String(info.name || path.basename(file, '.folio')).slice(0, 80);
+  fs.mkdirSync(DEFAULT_ROOT(), { recursive: true });
+  const dir = uniqueDir(path.join(DEFAULT_ROOT(), slugify(name)));
+  for (const e of entries) {
+    if (e.name === 'folio.json') continue;
+    const dest = path.join(dir, ...e.name.split('/'));
+    if (!dest.startsWith(dir + path.sep)) continue;
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, e.data);
+  }
+  const list = readSites();
+  const site = { id: crypto.randomBytes(6).toString('hex'), name, template: info.template || 'leeg', dir, created: new Date().toISOString(), opened: true };
+  list.push(site);
+  writeSites(list);
+  return site;
+}
+
+/** Een .folio-bestand openen (dubbelklik in Verkenner/Finder of via de knop). */
+async function openFolioFile(file) {
+  try {
+    const site = importFolioFile(file);
+    if (win) {
+      if (running) await stopServer();
+      showHome();
+      win.webContents.once('did-finish-load', () => win && win.webContents.send('folio:refresh', { added: site.name }));
+    }
+    return site;
+  } catch (e) {
+    if (win) await dialog.showMessageBox(win, { type: 'warning', message: 'Openen mislukt', detail: e.message });
+    return null;
+  }
+}
+
+ipcMain.handle('folio:export', (_e, id) => exportSite(id));
+ipcMain.handle('folio:import-file', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Kies een Folio-bestand', properties: ['openFile'], filters: [{ name: 'Folio-website', extensions: ['folio'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  try {
+    return importFolioFile(r.filePaths[0]);
+  } catch (e) {
+    await dialog.showMessageBox(win, { type: 'warning', message: 'Openen mislukt', detail: e.message });
+    return null;
+  }
+});
+
+// Dubbelklik op een .folio-bestand: Windows geeft het pad mee als argument, macOS via 'open-file'.
+let pendingFile = process.argv.find((a) => a.toLowerCase().endsWith('.folio')) || null;
+app.on('open-file', (e, file) => {
+  e.preventDefault();
+  if (win) void openFolioFile(file);
+  else pendingFile = file;
+});
 
 // ── Opstarten ────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, argv) => {
+    const file = argv.find((a) => a.toLowerCase().endsWith('.folio'));
+    if (file) void openFolioFile(file);
     if (win) {
       if (win.isMinimized()) win.restore();
       win.focus();
@@ -351,6 +484,11 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     createWindow();
     checkUpdates();
+    if (pendingFile) {
+      const f = pendingFile;
+      pendingFile = null;
+      win.webContents.once('did-finish-load', () => void openFolioFile(f));
+    }
     app.on('activate', () => {
       if (!win) createWindow();
     });
@@ -360,7 +498,12 @@ if (!app.requestSingleInstanceLock()) {
       if (!isMac) app.quit();
     });
   });
-  app.on('before-quit', () => {
-    if (running) try { running.child.kill('SIGTERM'); } catch { /* al weg */ }
+  let quitting = false;
+  app.on('before-quit', (e) => {
+    if (!running || quitting) return;
+    // Wachten tot de site netjes is afgesloten, dan echt stoppen.
+    e.preventDefault();
+    quitting = true;
+    void stopServer().then(() => app.quit());
   });
 }

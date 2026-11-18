@@ -599,6 +599,27 @@ app.get('/*', (c) => {
   return c.text('Niet gevonden', 404);
 });
 
+// Netjes afsluiten (Folio vraagt dit via IPC; op Windows bestaat SIGTERM eigenlijk niet).
+let closing = false;
+function shutdown(sig?: NodeJS.Signals) {
+  if (closing) return;
+  closing = true;
+  try {
+    store.db.close();
+  } catch (e) {
+    console.error('Database sluiten mislukt:', (e as Error).message);
+  }
+  // Heeft het opstartscript (app.mjs) ook een handler, dan sluit dat zelf af (en stopt de tunnel).
+  if (sig && process.listenerCount(sig) > 1) return;
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('message', (m: unknown) => {
+  if ((m as { type?: string } | null)?.type === 'shutdown') shutdown();
+});
+process.on('disconnect', () => shutdown()); // hoofdproces van Folio is weg
+
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   console.log(`${config.edition === 'folio' ? 'Folio' : 'Vystara'} draait op http://localhost:${info.port}  (Studio: /studio/)`);
   if (process.send) process.send({ type: 'ready', port: info.port });

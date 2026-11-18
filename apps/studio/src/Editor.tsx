@@ -14,6 +14,15 @@ import {
   resetTransform,
   rotateSelection,
   nudgeFontSize,
+  selectSibling,
+  selectParentLayer,
+  toggleLockSelection,
+  toggleHideSelection,
+  nudgeTextSpacing,
+  nudgeSize,
+  zoomToSelection,
+  selectSimilar,
+  uploadAndInsert,
   alignSelection,
   distributeSelection,
   paste,
@@ -41,9 +50,21 @@ import { Rulers, toggleRulers } from './Rulers';
 import { edition, isFolio } from './edition';
 import { LANGUAGES, extraLangs, mainLang, translationProgress } from '@vystara/core';
 import { ThemeModal } from './ThemeModal';
+import { FindReplaceModal } from './FindReplace';
+import { Tour } from './Tour';
 import { AccessModal, HostingModal } from './Hosting';
 import { Breadcrumbs, CommandPalette, ContextMenu, SaveSectionModal } from './Overlays';
 import { findParent } from '@vystara/core';
+
+/** Is er minstens één tekst of knop geselecteerd? Dan sturen Shift+[ en Shift+] de lettergrootte. */
+function selectionHasText() {
+  const st = useStore.getState();
+  if (!st.tree || !st.selection) return false;
+  return [st.selection, ...(st.extra ?? [])].some((id) => {
+    const n = findNode(st.tree!, id);
+    return n?.type === 'text' || n?.type === 'button';
+  });
+}
 
 export function Editor({ onLogout }: { onLogout: () => void }) {
   const { bp, zoom, save, toast: t, modal, doc, unread, site } = useStore();
@@ -83,7 +104,7 @@ export function Editor({ onLogout }: { onLogout: () => void }) {
       <header className="vs-top">
         <div className="vs-top-left">
           {(window as unknown as { folio?: { home: () => void } }).folio && (
-            <button className="vs-icon-btn vs-home" title="Mijn websites (Ctrl+Shift+H)" onClick={async () => { await flushSave(); (window as unknown as { folio: { home: () => void } }).folio.home(); }}>
+            <button className="vs-icon-btn vs-home" title="Mijn websites (Ctrl+Shift+M)" onClick={async () => { await flushSave(); (window as unknown as { folio: { home: () => void } }).folio.home(); }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
             </button>
           )}
@@ -152,6 +173,8 @@ export function Editor({ onLogout }: { onLogout: () => void }) {
       {t && <div className={`vs-toast ${t.kind}`}>{t.text}</div>}
       {modal === 'site' && <SiteModal />}
       {modal === 'shortcuts' && <ShortcutsModal />}
+      {modal === 'find' && <FindReplaceModal />}
+      <Tour />
       {modal === 'history' && <HistoryModal />}
       {modal === 'inbox' && <InboxModal />}
       {modal === 'theme' && <ThemeModal />}
@@ -185,6 +208,11 @@ function useShortcuts() {
       if (mod && k === 'k') {
         e.preventDefault();
         patchState({ palette: !useStore.getState().palette });
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && k === 'f') {
+        e.preventDefault();
+        patchState({ modal: 'find' });
         return;
       }
       if (mod && e.altKey && k === 's') {
@@ -234,9 +262,8 @@ function useShortcuts() {
         e.preventDefault();
         copySelection(true);
       } else if (mod && k === 'v') {
-        e.preventDefault();
-        paste();
-      } else if (mod && k === 'a') {
+        // Niet tegenhouden: het 'paste'-event hieronder kijkt of er een afbeelding op het klembord staat.
+      } else if (mod && !e.shiftKey && k === 'a') {
         // Alle lagen naast de huidige selectie (zelfde ouder).
         e.preventDefault();
         if (st.tree && st.selection) {
@@ -255,9 +282,41 @@ function useShortcuts() {
       } else if (mod && k === '0') {
         e.preventDefault();
         patchState({ zoom: 1 });
-      } else if (e.shiftKey && k === '1') {
+      } else if (e.shiftKey && !mod && e.code === 'Digit1') {
         e.preventDefault();
         fitZoom();
+      } else if (e.shiftKey && !mod && e.code === 'Digit2') {
+        e.preventDefault();
+        zoomToSelection();
+      } else if (e.key === 'Tab' && !mod && !e.altKey) {
+        e.preventDefault();
+        selectSibling(e.shiftKey ? -1 : 1);
+      } else if (e.key === 'Enter' && e.shiftKey && !mod) {
+        e.preventDefault();
+        selectParentLayer();
+      } else if (mod && e.shiftKey && !e.altKey && e.code === 'KeyL') {
+        e.preventDefault();
+        toggleLockSelection();
+      } else if (mod && e.shiftKey && !e.altKey && e.code === 'KeyA') {
+        e.preventDefault();
+        selectSimilar();
+      } else if ((e.key === 'F2' || (mod && !e.shiftKey && !e.altKey && k === 'r')) && st.selection && st.selection !== st.tree?.id) {
+        e.preventDefault();
+        patchState({ leftTab: 'layers', renaming: st.selection });
+      } else if (e.altKey && !mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && selectionHasText()) {
+        // Alt+←/→: letterafstand (Shift: grotere stappen), zoals tracking in Photoshop.
+        e.preventDefault();
+        nudgeTextSpacing('letterSpacing', (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 0.05 : 0.01));
+      } else if (e.altKey && !mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && selectionHasText()) {
+        // Alt+↑/↓ bij tekst: regelhoogte.
+        e.preventDefault();
+        nudgeTextSpacing('lineHeight', (e.key === 'ArrowDown' ? 1 : -1) * (e.shiftKey ? 0.2 : 0.05));
+      } else if (mod && !e.altKey && e.key.startsWith('Arrow') && st.selection) {
+        // Ctrl+pijltjes: breedte en hoogte (Shift: 10 px).
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+        if (d) nudgeSize(d[0], d[1]);
       } else if (e.shiftKey && k === 'a') {
         e.preventDefault();
         toggleAutoLayout();
@@ -282,6 +341,10 @@ function useShortcuts() {
       } else if (mod && e.shiftKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
         e.preventDefault();
         moveToEdge(e.code === 'BracketRight' ? 'front' : 'back');
+      } else if (!mod && e.shiftKey && (e.code === 'BracketRight' || e.code === 'BracketLeft') && selectionHasText()) {
+        // Shift+] / Shift+[ : tekst groter of kleiner (2 px, met Alt erbij 10 px), zoals in Photoshop en Illustrator.
+        e.preventDefault();
+        nudgeFontSize((e.code === 'BracketRight' ? 1 : -1) * (e.altKey ? 10 : 2));
       } else if (!mod && !e.altKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
         e.preventDefault();
         const dir = e.code === 'BracketRight' ? 1 : -1;
@@ -319,12 +382,24 @@ function useShortcuts() {
         insertType('text');
       } else if (mod && e.shiftKey && k === 'h') {
         e.preventDefault();
-        const n = st.tree && st.selection ? findNode(st.tree, st.selection) : null;
-        if (n) mutate('hide', (t) => void ((findNode(t, n.id)!.hidden = !n.hidden || undefined)));
+        toggleHideSelection();
       }
     };
+    // Plakken: een afbeelding (bv. screenshot) wordt geüpload en ingevoegd, anders plakken we lagen.
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
+      const files = Array.from(e.clipboardData?.files ?? []);
+      e.preventDefault();
+      if (files.length) void uploadAndInsert(files);
+      else paste();
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('paste', onPaste);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('paste', onPaste);
+    };
   }, []);
 }
 
@@ -641,20 +716,23 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ['Algemeen', [
     ['Ctrl K', 'Opdrachtenpalet'], ['Ctrl S', 'Opslaan'], ['Ctrl Z / Ctrl Shift Z', 'Ongedaan maken / opnieuw'],
     ['Ctrl D', 'Dupliceren'], ['Delete', 'Verwijderen'], ['Ctrl C / Ctrl V', 'Kopiëren / plakken'],
-    ['Ctrl Alt C / V', 'Stijl kopiëren / plakken'], ['Ctrl Alt G', 'In frame zetten'], ['Ctrl Alt K', 'Component maken'], ['?', 'Dit overzicht'],
+    ['Ctrl Alt C / V', 'Stijl kopiëren / plakken'], ['Ctrl Alt G', 'In frame zetten'], ['Ctrl Alt K', 'Component maken'], ['Ctrl V (afbeelding)', 'Screenshot of afbeelding plakken'], ['Ctrl F', 'Zoeken en vervangen'], ['?', 'Dit overzicht'],
   ]],
   ['Canvas', [
     ['Ctrl + scrollwiel', 'Zoomen rond de muis'], ['Spatie + slepen', 'Canvas verschuiven'], ['Middelste\u00a0muisknop', 'Canvas verschuiven'],
-    ['Ctrl + / Ctrl − / Ctrl 0', 'In- en uitzoomen / 100%'], ['Shift R', 'Linialen aan/uit'], ['Liniaal slepen', 'Hulplijn maken (terugslepen = weg)'], ['Pijltjes (Shift)', 'Verplaatsen 1 px (10 px)'], ['Ctrl tijdens slepen', 'Slim uitlijnen uit'],
+    ['Ctrl + / Ctrl − / Ctrl 0', 'In- en uitzoomen / 100%'], ['Shift R', 'Linialen aan/uit'], ['Liniaal slepen', 'Hulplijn maken (terugslepen = weg)'], ['Shift 1 / Shift 2', 'Alles in beeld / inzoomen op selectie'], ['Pijltjes (Shift)', 'Verplaatsen 1 px (10 px)'], ['Ctrl tijdens slepen', 'Slim uitlijnen uit'], ['Alt ingedrukt', 'Afstanden meten tot de laag onder de muis'], ['Bestanden slepen', 'Afbeelding of video op het canvas zetten'],
+  ]],
+  ['Selecteren en lagen', [
+    ['Tab / Shift Tab', 'Volgende / vorige laag'], ['Enter / Shift Enter', 'Laag erin / laag erboven'], ['Esc', 'Naar de laag erboven'], ['Ctrl Shift A', 'Alles wat erop lijkt selecteren'], ['F2 / Ctrl R', 'Hernoemen'], ['Ctrl Shift H', 'Verbergen'], ['Ctrl Shift L', 'Vergrendelen'], ['Alt + slepen', 'Kopie slepen'],
   ]],
   ['Transformeren', [
     ['Shift + hoek', 'Verhouding vasthouden'], ['Alt + hoek', 'Vanuit het midden'], ['Ctrl + hoek', 'Schalen (ook tekst en effecten)'],
-    ['Shift tijdens draaien', 'Per 15°'], [']  /  [', 'Draaien ±90°'], ['Shift ]  /  [', 'Draaien ±15°'],
-    ['Shift H / Shift V', 'Spiegelen'], ['Alt A / H / D', 'Uitlijnen links / midden / rechts'], ['Alt W / V / S', 'Uitlijnen boven / midden / onder'], ['Alt Shift H / V', 'Gelijk verdelen'], ['Ctrl Shift ]  /  [', 'Naar voren / achteren'], ['Alt R', 'Transformatie wissen'],
+    ['Shift tijdens draaien', 'Per 15°'], [']  /  [', 'Draaien ±90°'], ['Shift ]  /  [', 'Draaien ±15° (bij lagen zonder tekst)'],
+    ['Shift H / Shift V', 'Spiegelen'], ['Alt A / H / D', 'Uitlijnen links / midden / rechts'], ['Alt W / V / S', 'Uitlijnen boven / midden / onder'], ['Alt Shift H / V', 'Gelijk verdelen'], ['Ctrl pijltjes (Shift)', 'Breedte / hoogte ±1 px (10 px)'], ['Ctrl Shift ]  /  [', 'Naar voren / achteren'], ['Alt R', 'Transformatie wissen'],
   ]],
   ['Tekst bewerken', [
     ['Dubbelklik', 'Tekst bewerken'], ['Ctrl B / I / U', 'Vet / cursief / onderstreept'], ['Ctrl Shift X', 'Doorhalen'],
-    ['Ctrl Shift H', 'Markeren'], ['Ctrl Shift C', 'Code'], ['Ctrl Shift > / <', 'Tekst groter / kleiner (Alt: 10 px)'], ['Ctrl K', 'Link'], ['Ctrl \\', 'Opmaak wissen'], ['Esc / Ctrl Enter', 'Klaar'],
+    ['Ctrl Shift H', 'Markeren'], ['Ctrl Shift C', 'Code'], ['Shift ]  /  [', 'Tekst groter / kleiner (Alt: 10 px)'], ['Ctrl Shift > / <', 'Tekst groter / kleiner'], ['Alt ← / →', 'Letterafstand (Shift: grotere stap)'], ['Alt ↑ / ↓', 'Regelhoogte'], ['Ctrl V', 'Plakken zonder opmaak'], ['Ctrl K', 'Link'], ['Ctrl \\', 'Opmaak wissen'], ['Esc / Ctrl Enter', 'Klaar'],
   ]],
 ];
 

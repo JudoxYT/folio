@@ -17,6 +17,7 @@ import { BUTTON_KEYS, BUTTON_LABEL, SVG_LIBRARY, TEXT_STYLE_KEYS, TEXT_STYLE_LAB
 import { SeoPanel } from './SeoPanel';
 import { api } from './api';
 import { AssetSelect, ColorField, Num, Row, Section, Segmented, Select, Text, Toggle } from './ui';
+import { askText } from './dialog';
 
 type Sec = 'layout' | 'size' | 'position' | 'style';
 
@@ -1066,7 +1067,7 @@ function SharedStyleSection({ n }: { n: VNode }) {
           <div className="vs-btnrow">
             {hasOwn && <button className="vs-btn" onClick={() => void updateSharedStyle()}>Stijl bijwerken</button>}
             <button className="vs-btn" onClick={detachSharedStyle} title="Opmaak overnemen en de koppeling verbreken">Losmaken</button>
-            <button className="vs-btn" onClick={() => { const v = prompt('Nieuwe naam voor deze stijl', cur.name); if (v) void renameSharedStyle(n.styleRef!, v); }}>Hernoemen</button>
+            <button className="vs-btn" onClick={async () => { const v = await askText('Nieuwe naam voor deze stijl', cur.name, 'Hernoemen'); if (v) void renameSharedStyle(n.styleRef!, v); }}>Hernoemen</button>
             <button className="vs-btn vs-danger" onClick={() => { if (confirm(`Stijl “${cur.name}” verwijderen? Lagen die hem gebruiken houden alleen hun eigen opmaak.`)) void deleteSharedStyle(n.styleRef!); }}>Verwijderen</button>
           </div>
         </>

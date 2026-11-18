@@ -40,6 +40,15 @@ export class Database {
     this.db.exec(`PRAGMA ${p}`);
   }
 
+  /** Netjes afsluiten: WAL terugschrijven naar het hoofdbestand en sluiten. */
+  close() {
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch { /* geen WAL */ }
+    this.cache.clear();
+    this.db.close();
+  }
+
   prepare(sql: string): Statement {
     let st = this.cache.get(sql);
     if (!st) {

@@ -455,3 +455,39 @@ input[type='color'] { width: 30px; height: 30px; padding: 0; border: 1px solid v
 [data-edition='folio'] { --ui-accent: #8b7bff; }
 [data-edition='folio'] .vs-brand { background: linear-gradient(135deg, #8b7bff, #5ee0c2); color: #0d0b1f; }
 .vs-home { margin-right: 4px; }
+
+/* Laag hernoemen in het lagenpaneel */
+.vs-layer-rename { height: 22px; padding: 0 6px; font-size: 12px; min-width: 0; }
+
+/* Afstanden meten (Alt) */
+.vs-measure-box { outline: 1px dashed #ff4d6d; outline-offset: -1px; pointer-events: none; }
+.vs-measure { position: absolute; background: #ff4d6d; pointer-events: none; z-index: 30; }
+.vs-measure span {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  background: #ff4d6d; color: #fff; font: 600 11px/1 system-ui, sans-serif; padding: 3px 5px; border-radius: 4px; white-space: nowrap;
+}
+.vs-measure.h span { top: calc(50% - 12px); }
+.vs-measure.v span { left: calc(50% + 4px); transform: translate(0, -50%); }
+
+/* Bestanden op het canvas slepen */
+.vs-viewport[data-file-over] { box-shadow: inset 0 0 0 3px var(--ui-accent); }
+.vs-file-over { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 80; pointer-events: none; background: #111; color: #fff; padding: 10px 16px; border-radius: 10px; font: 600 13px/1.2 var(--ui-font); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+
+/* Zoeken en vervangen */
+.vs-find { display: grid; gap: 8px; }
+.vs-find .vs-input { width: 100%; }
+.vs-find .vs-check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.vs-find-hits { list-style: none; margin: 0; padding: 0; border: 1px solid var(--ui-line, #2a2b33); border-radius: 8px; max-height: 180px; overflow: auto; }
+.vs-find-hits li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; font-size: 13px; border-top: 1px solid var(--ui-line, #2a2b33); }
+.vs-find-hits li:first-child { border-top: 0; }
+
+/* Rondleiding (eerste keer) */
+.vs-tour { position: fixed; inset: 0; z-index: 200; }
+.vs-tour-dim { position: absolute; inset: 0; background: rgba(5,5,10,.6); }
+.vs-tour-hole { position: absolute; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(5,5,10,.6); outline: 2px solid var(--ui-accent); transition: all .25s ease; pointer-events: none; }
+.vs-tour-card { position: absolute; background: var(--ui-panel, #17181d); color: var(--ui-text, #e8e8ee); border: 1px solid var(--ui-line, #2a2b33); border-radius: 14px; padding: 16px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5); display: grid; gap: 6px; }
+.vs-tour-card small { color: var(--ui-muted, #9a9aa8); font-size: 12px; }
+.vs-tour-card b { font-size: 16px; }
+.vs-tour-card p { margin: 0 0 6px; font-size: 13.5px; line-height: 1.5; color: var(--ui-muted, #b5b5c0); }
+.vs-tour-actions { display: flex; gap: 8px; align-items: center; }
+.vs-tour-actions .grow { flex: 1; }

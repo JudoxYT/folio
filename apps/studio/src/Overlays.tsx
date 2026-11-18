@@ -32,6 +32,9 @@ import {
   unwrapFrame,
   useStore,
   wrapInFrame,
+  selectSimilar,
+  toggleLockSelection,
+  zoomToSelection,
 } from './store';
 import { Modal, Row, Text } from './ui';
 
@@ -97,6 +100,7 @@ export function ContextMenu() {
         ['Knippen', 'Ctrl+X', () => copySelection(true)],
         ['Plakken', 'Ctrl+V', paste],
         ['Dupliceren', 'Ctrl+D', duplicateSelection],
+        ...(!isRoot ? [['Selecteer alles wat hierop lijkt', 'Ctrl+Shift+A', selectSimilar] as Item, ['Inzoomen op selectie', 'Shift+2', zoomToSelection] as Item, ['Hernoemen', 'F2', () => patchState({ leftTab: 'layers', renaming: n.id })] as Item] : []),
         { label: 'Stijl', sub: [['Stijl kopiëren', 'Ctrl+Alt+C', copyStyle], [hasStyleClipboard() ? 'Stijl plakken' : 'Stijl plakken (eerst kopiëren)', 'Ctrl+Alt+V', pasteStyle]] },
         '-',
         ...(!isRoot ? [{ label: 'Transformeren', sub: transform } as Item, { label: 'Formaat', sub: size } as Item] : []),
@@ -110,7 +114,7 @@ export function ContextMenu() {
         ...(n.type === 'instance' && n.component ? [['Component bewerken', 'dubbelklik', () => void openDoc({ kind: 'component', id: n.component })] as Item] : []),
         '-',
         [n.hidden ? 'Tonen' : 'Verbergen', 'Ctrl+Shift+H', () => setHidden(n.id, !n.hidden)],
-        [n.locked ? 'Ontgrendelen' : 'Vergrendelen', '', () => setField(n.id, 'locked', n.locked ? undefined : true)],
+        ...(!isRoot ? [[n.locked ? 'Ontgrendelen' : 'Vergrendelen', 'Ctrl+Shift+L', toggleLockSelection] as Item] : []),
         ...(bp !== 'desktop' && n.responsive?.[bp] ? [[`Aanpassingen ${bp === 'tablet' ? 'tablet' : 'mobiel'} terugzetten`, '', () => resetBreakpoint(n.id)] as Item] : []),
         ['Effecten…', '', () => patchState({ rightTab: 'effects' })],
         '-',
@@ -235,6 +239,8 @@ export function CommandPalette() {
       { group: 'Venster', label: 'Toegang & live voorbeeld (vergrendelen)', run: () => patchState({ modal: 'access' }) },
       { group: 'Venster', label: 'Formulierinzendingen', run: () => patchState({ modal: 'inbox' }) },
       { group: 'Venster', label: 'Versiegeschiedenis', run: () => patchState({ modal: 'history' }) },
+      { group: 'Venster', label: 'Zoeken en vervangen', run: () => patchState({ modal: 'find' }) },
+      { group: 'Venster', label: 'Sneltoetsen', run: () => patchState({ modal: 'shortcuts' }) },
       { group: 'Weergave', label: 'Desktop', run: go('desktop') },
       { group: 'Weergave', label: 'Tablet', run: go('tablet') },
       { group: 'Weergave', label: 'Mobiel', run: go('mobile') },

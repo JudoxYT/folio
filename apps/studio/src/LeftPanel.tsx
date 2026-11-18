@@ -1,5 +1,5 @@
 import { Icon } from './icons';
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { LANGUAGES, extraLangs, findNode, newNode, type Asset, type Project, type VNode } from '@vystara/core';
 import {
   setHidden,
@@ -21,6 +21,7 @@ import {
 import { api, uploadFile } from './api';
 import { AssetSelect, Row, Text, Toggle } from './ui';
 import { InsertPanel } from './InsertPanel';
+import { askText } from './dialog';
 
 const TABS: { id: LeftTab; label: string; icon: string }[] = [
   { id: 'insert', label: 'Invoegen', icon: 'plus' },
@@ -59,7 +60,7 @@ export function LeftPanel() {
 function PagesTab() {
   const { pages, doc } = useStore();
   const add = async () => {
-    const title = prompt('Titel van de nieuwe pagina');
+    const title = await askText('Titel van de nieuwe pagina', '', 'Maken');
     if (!title) return;
     try {
       const p = await api.post<(typeof pages)[number]>('/api/pages', { title });
@@ -152,8 +153,13 @@ function LayersTab() {
 let dragId: string | null = null;
 
 function LayerRow({ node, depth }: { node: VNode; depth: number }) {
-  const { selection, extra, hover, bp } = useStore();
+  const { selection, extra, hover, bp, renaming } = useStore();
   const [open, setOpen] = useState(depth < 2);
+  // Klap open als de selectie (of de laag die je hernoemt) hierbinnen zit.
+  useEffect(() => {
+    const target = renaming ?? selection;
+    if (!open && target && target !== node.id && node.type === 'frame' && findNode(node, target)) setOpen(true);
+  }, [selection, renaming]); // eslint-disable-line react-hooks/exhaustive-deps
   const [drop, setDrop] = useState<'before' | 'after' | 'inside' | null>(null);
   const hasKids = node.type === 'frame' && node.children.length > 0;
   const hidden = bp === 'desktop' ? node.hidden : node.responsive?.[bp]?.hidden ?? node.responsive?.tablet?.hidden ?? node.hidden;
@@ -192,16 +198,33 @@ function LayerRow({ node, depth }: { node: VNode; depth: number }) {
         onContextMenu={(e) => { e.preventDefault(); select(node.id); useStore.setState({ menu: { x: e.clientX, y: e.clientY, id: node.id } }); }}
         onMouseEnter={() => useStore.setState({ hover: node.id })}
         onMouseLeave={() => useStore.setState({ hover: null })}
-        onDoubleClick={() => {
-          const name = prompt('Naam van de laag', node.name);
-          if (name) setField(node.id, 'name', name);
-        }}
+        onDoubleClick={() => useStore.setState({ renaming: node.id })}
       >
         <span className="vs-caret" onClick={(e) => { e.stopPropagation(); setOpen(!open); }}>
           {hasKids ? (open ? '▾' : '▸') : ''}
         </span>
         <span className="vs-layer-icon">{node.type === 'frame' && node.layout?.mode === 'horizontal' ? '⇥' : ICON[node.type]}</span>
-        <span className="grow">{node.name}</span>
+        {renaming === node.id ? (
+          <input
+            className="vs-input vs-layer-rename grow"
+            defaultValue={node.name}
+            autoFocus
+            onFocus={(e) => e.currentTarget.select()}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Escape') { e.currentTarget.value = node.name; e.currentTarget.blur(); }
+            }}
+            onBlur={(e) => {
+              const v = e.currentTarget.value.trim();
+              if (v && v !== node.name) setField(node.id, 'name', v);
+              useStore.setState({ renaming: null });
+            }}
+          />
+        ) : (
+          <span className="grow">{node.name}</span>
+        )}
         {node.locked && <span className="vs-muted" title="Vergrendeld">🔒</span>}
         {node.note && <span className="vs-muted" title={node.note}>💬</span>}
         <button
@@ -367,7 +390,7 @@ function ProjectsTab() {
   const { projects } = useStore();
   const [openId, setOpenId] = useState<string | null>(null);
   const add = async () => {
-    const title = prompt('Titel van het project');
+    const title = await askText('Titel van het project', '', 'Maken');
     if (!title) return;
     const p = await api.post<Project>('/api/projects', { title });
     patchState({ projects: [...useStore.getState().projects, p] });
