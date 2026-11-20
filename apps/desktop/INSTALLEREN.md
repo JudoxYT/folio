@@ -29,6 +29,14 @@ Nieuwe versies installeert Folio vanzelf: je ziet een melding in *Mijn websites*
 3. Ga naar **Systeeminstellingen → Privacy en beveiliging**, scrol omlaag en klik bij *"Folio is geblokkeerd"* op **Toch openen**. Bevestig met je wachtwoord of Touch ID.
 4. Daarna opent Folio voortaan gewoon.
 
+**Zegt je Mac dat Folio "beschadigd" is en naar de prullenmand moet?** Dat kwam voor bij versies tot en met 0.1.3; vanaf 0.1.4 zou het niet meer moeten gebeuren. Zie je het toch: sleep Folio eerst naar **Apps**, open **Terminal** (via Spotlight: ⌘ + spatie, typ *Terminal*) en plak deze regel:
+
+```
+xattr -cr /Applications/Folio.app
+```
+
+Druk op Enter en open Folio opnieuw. Er is niets mis met het bestand: de Mac zet alleen een blokkade op apps zonder betaald Apple-certificaat, en dit commando haalt die weg.
+
 Is er een nieuwe versie, dan zie je een melding in *Mijn websites* met een downloadknop. Installeer hem op dezelfde manier; je websites blijven bewaard.
 
 ## Waar staan mijn websites?
