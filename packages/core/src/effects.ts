@@ -137,6 +137,8 @@ export const EFFECT_PRESETS: { id: string; label: string; effects: Effects }[] =
   { id: 'zoom-in', label: 'Inzoomen', effects: { reveal: { from: { opacity: 0, scale: 0.92 }, duration: 900 } } },
   { id: 'blur-in', label: 'Uit vaag', effects: { reveal: { from: { opacity: 0, blur: 16, y: 16 }, duration: 1000 } } },
   { id: 'stagger', label: 'Kinderen na elkaar', effects: { reveal: { from: { opacity: 0, y: 24 }, duration: 700, stagger: 90 } } },
+  { id: 'curtain', label: 'Gordijn (beeld onthult zich van onder)', effects: { reveal: { from: { clip: 'up', scale: 1.08 }, duration: 1100, easing: 'smooth' } } },
+  { id: 'curtain-stagger', label: 'Gordijn, kinderen na elkaar', effects: { reveal: { from: { clip: 'up', y: 30 }, duration: 1000, stagger: 120, easing: 'smooth' } } },
   { id: 'parallax-slow', label: 'Parallax (diepte; zet de ouder op afknippen)', effects: { parallax: { speed: 0.25 } } },
   { id: 'parallax-fast', label: 'Parallax (voorgrond)', effects: { parallax: { speed: -0.2 } } },
   { id: 'scroll-zoom', label: 'Inzoomen bij scrollen', effects: { scroll: { from: { scale: 0.85, opacity: 0.4 }, to: { scale: 1, opacity: 1 }, start: 0, end: 0.5 } } },

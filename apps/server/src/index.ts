@@ -10,6 +10,7 @@ import * as media from './media.js';
 import { publish, renderPage, renderProject } from './publish.js';
 import * as forms from './forms.js';
 import * as deploy from './deploy.js';
+import * as netlify from './netlify.js';
 import { downloadGoogleFont } from './fonts.js';
 import * as starter from './starter.js';
 import crypto from 'node:crypto';
@@ -286,6 +287,30 @@ app.post('/api/deploy/push', async (c) => {
   }
 });
 
+// ── Netlify (één klik online) ────────────────────────────────
+app.get('/api/netlify', (c) => c.json(netlify.getNetlify()));
+app.put('/api/netlify', async (c) => {
+  try {
+    return c.json(await netlify.saveNetlify(await c.req.json()));
+  } catch (e) {
+    return bad(c, (e as Error).message);
+  }
+});
+app.post('/api/netlify/push', async (c) => {
+  if (publishing) return bad(c, 'Er wordt al gepubliceerd', 409);
+  publishing = true;
+  try {
+    await netlify.ensureSite();
+    await publish();
+    const r = await netlify.pushNetlify();
+    return r.ok ? c.json(r) : bad(c, r.message);
+  } catch (e) {
+    return bad(c, (e as Error).message);
+  } finally {
+    publishing = false;
+  }
+});
+
 // ── Vystara-startsite ────────────────────────────────────────
 app.get('/api/starter', (c) => c.json(starter.getStatus()));
 // Nieuwe installatie: merkbestanden, lettertypes en beelden van de oude site meteen ophalen.
@@ -381,9 +406,12 @@ app.post('/api/publish', async (c) => {
   try {
     const r = await publish();
     const dc = deploy.getDeployConfig();
+    const nl = netlify.getNetlify();
     let deployResult: unknown = null;
-    if (dc.autoPush && dc.repo && dc.hasToken) {
-      deployResult = await deploy.pushSite().catch((e) => ({ ok: false, message: (e as Error).message }));
+    if (nl.hasToken && nl.siteId && nl.autoPush) {
+      deployResult = { ...(await netlify.pushNetlify()), via: 'netlify' };
+    } else if (dc.autoPush && dc.repo && dc.hasToken) {
+      deployResult = { ...(await deploy.pushSite().catch((e) => ({ ok: false, message: (e as Error).message }))), via: 'github' };
     } else if (dc.repo && dc.hasToken) {
       deployResult = { ok: false, message: 'niet naar GitHub gestuurd: zet "Automatisch na publiceren" aan (Publiceren ▾)' };
     } else {

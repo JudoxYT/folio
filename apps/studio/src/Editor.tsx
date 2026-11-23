@@ -91,8 +91,10 @@ export function Editor({ onLogout }: { onLogout: () => void }) {
       // Eerst kapotte links zoeken; bij problemen kies je zelf of je toch publiceert.
       const check = await api.get<{ issues: { where: string; layer: string; href: string; reason: string }[] }>('/api/linkcheck').catch(() => ({ issues: [] }));
       if (check.issues.length && !(await confirmLinks(check.issues))) return;
-      const r = await api.post<{ pages: number; projects: number; files: number; durationMs: number; commandOutput?: string; deploy?: { ok: boolean; message: string } | null }>('/api/publish');
-      toast(`Gepubliceerd: ${r.pages} pagina's, ${r.projects} projecten, ${r.files} bestanden${r.deploy ? ` · GitHub: ${r.deploy.message}${r.deploy.ok ? ' → Vercel zet hem binnen ±1 minuut live' : ''}` : ''}`, r.deploy && !r.deploy.ok ? 'error' : 'info');
+      const r = await api.post<{ pages: number; projects: number; files: number; durationMs: number; commandOutput?: string; deploy?: { ok: boolean; message: string; via?: 'netlify' | 'github' } | null }>('/api/publish');
+      const d = r.deploy;
+      const extra = !d ? '' : d.via === 'netlify' ? ` · Netlify: ${d.message}` : d.via === 'github' || !isFolio() ? ` · GitHub: ${d.message}${d.ok ? ' → Vercel zet hem binnen ±1 minuut live' : ''}` : ` · ${d.message}`;
+      toast(`Gepubliceerd: ${r.pages} pagina's, ${r.projects} projecten, ${r.files} bestanden${extra}`, d && !d.ok ? 'error' : 'info');
       if (r.commandOutput) console.info(r.commandOutput);
     } catch (e) {
       toast(`Publiceren mislukt: ${(e as Error).message}`, 'error');
@@ -496,6 +498,11 @@ function SiteModal() {
             )}
             <Row label=""><Toggle value={draft.analytics === 'vercel'} onChange={(v) => setDraft({ ...draft, analytics: v ? 'vercel' : 'off' })} label="Bezoekersstatistieken (Vercel Analytics)" /></Row>
             {draft.analytics === 'vercel' && <p className="vs-help">Zet in Vercel ook <b>Analytics</b> aan: Project → Analytics → Enable. Gratis, zonder cookies; je ziet daar hoeveel mensen je site bekijken en waar ze vandaan komen. Werkt alleen als je site op Vercel staat.</p>}
+            <Row label=""><Toggle value={draft.autoShareImage !== false} onChange={(v) => setDraft({ ...draft, autoShareImage: v ? undefined : false })} label="Automatische deel-afbeelding" /></Row>
+            <p className="vs-help">Plakt iemand een link naar je site in Discord of WhatsApp, dan verschijnt er een kaart met de paginatitel in jouw kleuren. Alleen voor pagina's zonder eigen deel-afbeelding (die stel je in bij de pagina-instellingen).</p>
+            <div className="vs-subhead">Formulieren</div>
+            <Row label="Mail naar"><Text value={draft.formEmail} placeholder="bv. hallo@jouwdomein.nl" onChange={(v) => setDraft({ ...draft, formEmail: v.trim() || undefined })} /></Row>
+            <p className="vs-help">Berichten uit je contactformulieren komen in deze mailbox binnen, waar je site ook staat (Netlify, Vercel of ergens anders). Dat gaat via de gratis dienst FormSubmit. Na het eerste bericht krijg je één keer een mail om het te activeren; daarna komt alles gewoon binnen. Leeg laten = de oude manier (via je eigen server).</p>
           </div>
           <div>
             <div className="vs-subhead">Als de site ergens anders staat</div>

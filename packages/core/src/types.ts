@@ -170,6 +170,8 @@ export interface Motion {
   color?: string;
   /** Alleen bij hover: achtergrondkleur. */
   bg?: string;
+  /** Alleen bij verschijnen: beeld wordt onthuld als een gordijn, vanaf deze kant. */
+  clip?: 'up' | 'down' | 'left' | 'right';
 }
 
 export type Easing = 'ease' | 'ease-out' | 'ease-in-out' | 'linear' | 'smooth' | 'spring';
@@ -433,6 +435,8 @@ export interface SiteSettings {
   lightbox?: 'projects' | 'all' | 'off';
   /** Vloeiende overgang tussen pagina's. Standaard: vervagen. */
   pageTransition?: 'none' | 'fade' | 'slide' | 'zoom' | 'wipe';
+  /** Bij een paginaovergang vliegt het projectbeeld van de kaart naar de projectpagina (en terug). Standaard aan. */
+  projectMorph?: boolean;
   /** Knop waarmee bezoekers tussen licht en donker wisselen. `alt` = kleurenschema voor de andere modus (leeg = automatisch). */
   colorMode?: { toggle: boolean; alt?: string };
   /** Bezoekersstatistieken: Vercel Web Analytics (werkt alleen als de site op Vercel staat). */
@@ -446,6 +450,10 @@ export interface SiteSettings {
   mediaBaseUrl?: string;
   /** Adres van de server voor formulieren, als de site ergens anders gehost wordt. */
   formEndpoint?: string;
+  /** Berichten van formulieren naar dit e-mailadres sturen (via FormSubmit). Werkt op elke host, ook Netlify. */
+  formEmail?: string;
+  /** Pagina's zonder eigen deel-afbeelding krijgen automatisch een kaart in de kleuren van de site. Standaard aan. */
+  autoShareImage?: boolean;
 }
 
 export interface Seo {

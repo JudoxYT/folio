@@ -188,21 +188,23 @@ function marqueeInner(n: VNode, inner: string, gap: number): string {
 }
 
 function renderForm(n: FormNode, ctx: RenderContext, cls: string, attrs: string): string {
-  const endpoint = `${(ctx.site.formEndpoint ?? '').replace(/\/$/, '')}/api/forms/submit`;
+  const mail = (ctx.site.formEmail ?? '').trim();
+  const endpoint = mail ? `https://formsubmit.co/ajax/${mail.replace(/[^\w.@+-]/g, "")}` : `${(ctx.site.formEndpoint ?? '').replace(/\/$/, '')}/api/forms/submit`;
   const fields = n.fields
     .map((f) => {
       const name = `f_${f.id}`;
+      const lab = ` data-l="${esc(f.label)}"`;
       const req = f.required ? ' required' : '';
       const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
       let input: string;
-      if (f.kind === 'textarea') input = `<textarea name="${name}"${req}${ph} maxlength="5000"></textarea>`;
+      if (f.kind === 'textarea') input = `<textarea name="${name}"${lab}${req}${ph} maxlength="5000"></textarea>`;
       else if (f.kind === 'select')
-        input = `<select name="${name}"${req}><option value="">${esc(f.placeholder || 'Kies…')}</option>${(f.options ?? []).map((o) => `<option>${esc(o)}</option>`).join('')}</select>`;
-      else input = `<input type="${f.kind}" name="${name}"${req}${ph} maxlength="500"${f.kind === 'email' ? ' autocomplete="email"' : ''}>`;
+        input = `<select name="${name}"${lab}${req}><option value="">${esc(f.placeholder || 'Kies…')}</option>${(f.options ?? []).map((o) => `<option>${esc(o)}</option>`).join('')}</select>`;
+      else input = `<input type="${f.kind}" name="${name}"${lab}${req}${ph} maxlength="500"${f.kind === 'email' ? ' autocomplete="email"' : ''}>`;
       return `<label class="v-field"><span>${esc(f.label)}${f.required ? ' *' : ''}</span>${input}</label>`;
     })
     .join('');
-  return `<form class="${cls} v-form"${attrs} data-form="${esc(n.id)}" data-success="${esc(n.successMessage ?? 'Bedankt! Je bericht is verstuurd.')}" action="${esc(endpoint)}" method="post">` +
+  return `<form class="${cls} v-form"${attrs} data-form="${esc(n.id)}"${mail ? ` data-mail data-name="${esc(n.name)}"` : ''} data-success="${esc(n.successMessage ?? 'Bedankt! Je bericht is verstuurd.')}" action="${esc(endpoint)}" method="post">` +
     `<input type="hidden" name="_form" value="${esc(n.id)}"><input class="v-hp" name="_hp" tabindex="-1" autocomplete="off" aria-hidden="true">` +
     `${fields}<button class="v-submit" type="submit">${esc(n.submitLabel ?? 'Versturen')}</button><p class="v-form-msg" role="status"></p></form>`;
 }
@@ -317,6 +319,9 @@ export function pageTitle(site: SiteSettings, doc: { title: string; seo: Seo; pa
   return (site.seo?.titleTemplate || `%s — ${site.name}`).replace('%s', doc.title);
 }
 
+/** Projectbeeld als gedeeld element tussen pagina's (View Transitions tussen documenten). */
+const MORPH_JS = "(function(){if(!('onpagereveal' in window))return;var K='v-morph';\nfunction sid(el){var u=el.currentSrc||el.getAttribute('src')||el.getAttribute('poster')||el.getAttribute('srcset')||'';var m=u.match(/\\/media\\/([\\w-]+)\\//);return m?m[1]:null}\nfunction vis(el){var r=el.getBoundingClientRect();return r.width>40&&r.height>40&&r.bottom>0&&r.top<innerHeight}\nfunction find(id){var l=document.querySelectorAll('img,video');for(var i=0;i<l.length;i++){if(sid(l[i])===id&&vis(l[i]))return l[i]}return null}\nfunction store(id){try{id?sessionStorage.setItem(K,id):sessionStorage.removeItem(K)}catch(x){}}\nfunction read(){try{return sessionStorage.getItem(K)}catch(x){return null}}\naddEventListener('pageswap',function(e){if(!e.viewTransition||!e.activation)return;var to=e.activation.entry.url.split('#')[0],el=null,id=null,as=document.querySelectorAll('a[href]');\nfor(var i=0;i<as.length&&!el;i++){if(as[i].href.split('#')[0]===to){var m=as[i].querySelector('img,video');if(m&&sid(m)&&vis(m)){el=m;id=sid(m)}}}\nif(!el){id=read();if(id)el=find(id)}\nif(!el){store(null);return}store(id);el.style.viewTransitionName=K});\naddEventListener('pagereveal',function(e){if(!e.viewTransition)return;var id=read();if(!id)return;var el=find(id);if(!el)return;el.style.viewTransitionName=K;e.viewTransition.finished.finally(function(){el.style.viewTransitionName=''})});\n})();";
+
 export function renderDocument(doc: PageDocument, ctx: RenderContext): string {
   const { site } = ctx;
   const theme = siteTheme(site);
@@ -361,7 +366,10 @@ export function renderDocument(doc: PageDocument, ctx: RenderContext): string {
     zoom: '::view-transition-old(root){animation:.35s ease both v-pt-out}::view-transition-new(root){animation:.5s cubic-bezier(.2,.8,.2,1) both v-pt-in}@keyframes v-pt-out{to{opacity:0;scale:.96}}@keyframes v-pt-in{from{opacity:0;scale:1.04}}',
     wipe: '::view-transition-old(root){animation:.6s cubic-bezier(.7,0,.3,1) both v-pt-hold}::view-transition-new(root){animation:.6s cubic-bezier(.7,0,.3,1) both v-pt-in}@keyframes v-pt-hold{to{opacity:.6}}@keyframes v-pt-in{from{clip-path:inset(100% 0 0 0)}to{clip-path:inset(0)}}',
   };
-  const transitionCss = PT[pt] ? `@view-transition{navigation:auto}@media (prefers-reduced-motion:no-preference){${PT[pt]}}@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}` : '';
+  // Projectbeeld "vliegt" van de kaart naar de projectpagina (en terug): zelfde beeld = zelfde media-id.
+  const MORPH_CSS = '::view-transition-group(v-morph){animation-duration:.75s;animation-timing-function:cubic-bezier(.7,0,.2,1)}::view-transition-old(v-morph),::view-transition-new(v-morph){height:100%;object-fit:cover;animation:none;mix-blend-mode:normal}';
+  const transitionCss = PT[pt] ? `@view-transition{navigation:auto}@media (prefers-reduced-motion:no-preference){${PT[pt]}${site.projectMorph === false ? '' : MORPH_CSS}}@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}` : '';
+  const morphJs = PT[pt] && site.projectMorph !== false ? `<script>${MORPH_JS}</script>` : '';
 
   // Licht/donker-knop voor bezoekers.
   const modeKey = site.colorMode?.toggle ? altSchemeKey(theme, site.colorMode.alt) : null;
@@ -374,6 +382,7 @@ export function renderDocument(doc: PageDocument, ctx: RenderContext): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${esc(title)}</title>`,
+    morphJs,
     description ? `<meta name="description" content="${esc(description)}">` : '',
     noindex ? '<meta name="robots" content="noindex, nofollow">' : '<meta name="robots" content="index, follow, max-image-preview:large">',
     canonical ? `<link rel="canonical" href="${esc(canonical)}">` : '',

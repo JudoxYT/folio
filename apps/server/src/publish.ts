@@ -22,6 +22,8 @@ import {
 } from '@vystara/core';
 import { config, paths } from './config.js';
 import { allForms } from './forms.js';
+import { addShareImages } from './og.js';
+import { netlifyUrl } from './netlify.js';
 import { getProjectTemplate, getSite, listAssets, listComponents, listPages, listProjects, addRevision, markPublished } from './db.js';
 
 function loadContext() {
@@ -215,6 +217,7 @@ export async function publish(): Promise<PublishResult> {
 
   writeSeoFiles(out, ctx, pages, projects);
   writeFormFunction(out);
+  await addShareImages(out, ctx.site, ctx.site.domain ? `https://${ctx.site.domain}` : netlifyUrl()).catch((e) => console.warn('Deel-afbeeldingen overgeslagen:', (e as Error).message));
 
   // Atomisch wisselen: bezoekers zien nooit een halve site.
   const old = `${paths.site}-old-${t0}`;

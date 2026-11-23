@@ -37,7 +37,7 @@ xattr -cr /Applications/Folio.app
 
 Druk op Enter en open Folio opnieuw. Er is niets mis met het bestand: de Mac zet alleen een blokkade op apps zonder betaald Apple-certificaat, en dit commando haalt die weg.
 
-Is er een nieuwe versie, dan zie je een melding in *Mijn websites* met een downloadknop. Installeer hem op dezelfde manier; je websites blijven bewaard.
+Nieuwe versies downloadt Folio vanaf 0.1.5 zelf, ook op een Mac. Je ziet een melding in *Mijn websites*; klik op **Herstarten en bijwerken** en Folio opent vanzelf in de nieuwe versie, zonder waarschuwing van de Mac. Je websites blijven bewaard.
 
 ## Waar staan mijn websites?
 
@@ -45,4 +45,14 @@ In je map **Documenten → Folio**. Elke website is een eigen map. Wil je een we
 
 ## Online zetten
 
-In Folio: **Publiceren ▾ → Online zetten**. De makkelijkste manier is Netlify Drop (gratis): je sleept de map van je website naar de pagina en krijgt een adres als `jouw-naam.netlify.app`.
+In Folio: **Publiceren ▾ → Online zetten**. Maak één keer een gratis account bij Netlify, plak daar een toegangssleutel en klik op **Online zetten**. Folio maakt zelf een site voor je aan, met een adres als `jouw-naam-1a2b.netlify.app`. Daarna is elke nieuwe versie één klik, en het adres blijft hetzelfde. Een eigen domein koppel je in Netlify bij *Domain management*.
+
+Liever zonder account? Onder *Liever zonder account?* maakt Folio de map van je site klaar voor Netlify Drop, of download je hem als zip.
+
+## Contactformulier
+
+Vul bij **⚙ Site-instellingen → Formulieren** je e-mailadres in. Berichten uit je formulieren komen dan in je mail binnen, waar je site ook staat. Na het eerste bericht krijg je één keer een mail om het te activeren.
+
+## Vorige versie terugzetten
+
+Folio bewaart elke dag een kopie van je website (de laatste 7 dagen). In *Mijn websites*: klik met rechts op een website → **Vorige versie terugzetten…** en kies een dag. Je huidige versie wordt eerst bewaard, dus terugzetten kun je ook weer ongedaan maken.

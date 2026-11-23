@@ -62,15 +62,44 @@ async function open(id) {
 function menu(site, x, y) {
   document.querySelectorAll('.menu').forEach((m) => m.remove());
   const item = (label, fn, cls) => h('button', { class: cls, onclick: async () => { m.remove(); await fn(); } }, label);
-  const m = h('div', { class: 'menu', style: `left:${Math.min(x, innerWidth - 230)}px;top:${Math.min(y, innerHeight - 240)}px` },
+  const m = h('div', { class: 'menu', style: `left:${Math.min(x, innerWidth - 230)}px;top:${Math.min(y, innerHeight - 290)}px` },
     item('Openen', () => open(site.id)),
     item('Naam wijzigen…', () => renameDialog(site)),
     item('Dupliceren', async () => { await window.folio.duplicate(site.id); await refresh(); }),
+    item('Vorige versie terugzetten…', () => backupDialog(site)),
     item('Delen als bestand…', async () => { try { if (await window.folio.exportSite(site.id)) note('Bestand gemaakt. Stuur het naar wie je wilt; die opent het met Folio.'); } catch (e) { showError(e); } }),
     item(state.platform === 'darwin' ? 'Toon in Finder' : 'Toon in Verkenner', () => window.folio.reveal(site.id)),
     item('Verwijderen…', () => removeDialog(site), 'danger'));
   document.body.append(m);
   setTimeout(() => addEventListener('click', () => m.remove(), { once: true }), 0);
+}
+
+async function backupDialog(site) {
+  let list = [];
+  try { list = await window.folio.backups(site.id); } catch (e) { return showError(e); }
+  const fmt = (b) => b.before
+    ? `Vóór het terugzetten (${new Date(b.at).toLocaleString('nl-NL', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })})`
+    : new Date(b.at).toLocaleString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const restore = async (b) => {
+    const done = busy('Terugzetten…');
+    try {
+      await window.folio.restore(site.id, b.file);
+      done();
+      ov.remove();
+      note('Teruggezet. Open de website om het te bekijken.');
+      await refresh();
+    } catch (e) { done(); showError(e); }
+  };
+  const ov = h('div', { class: 'overlay', onclick: (e) => { if (e.target === ov) ov.remove(); } }, h('div', { class: 'dialog', style: 'width:min(520px,100%)' },
+    h('h2', {}, 'Vorige versie terugzetten'),
+    h('p', {}, list.length
+      ? `Folio bewaart elke dag een kopie van “${site.name}” (de laatste 7 dagen). Kies een versie; je huidige versie wordt eerst bewaard, dus je kunt dit ook weer ongedaan maken.`
+      : 'Er zijn nog geen back-ups. Folio maakt er elke dag één zodra je de website opent.'),
+    h('div', { class: 'backups' }, list.map((b) => h('div', { class: 'backup' },
+      h('span', { class: 'grow' }, fmt(b), h('small', {}, ` · ${Math.max(1, Math.round(b.size / 1024))} kB`)),
+      h('button', { class: 'ghost', onclick: () => restore(b) }, 'Terugzetten')))),
+    h('div', { class: 'row', style: 'margin-top:16px' }, h('button', { class: 'primary', onclick: () => ov.remove() }, 'Sluiten'))));
+  document.body.append(ov);
 }
 
 function renameDialog(site) {

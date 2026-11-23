@@ -9,7 +9,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const net = require('node:net');
 const crypto = require('node:crypto');
-const { fork } = require('node:child_process');
+const os = require('node:os');
+const { fork, spawn, execFileSync } = require('node:child_process');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { writeZip, readZip } = require('./zip.cjs');
 
 const isMac = process.platform === 'darwin';
@@ -347,16 +350,22 @@ function checkUpdates() {
   } catch {
     return;
   }
-  // Op Windows installeert hij de update zelf. Op een Mac kan dat alleen met een betaald Apple-certificaat,
-  // dus daar tonen we een melding met een downloadlink.
+  // Op Windows installeert electron-updater de update zelf. Op een Mac kan dat alleen met een betaald
+  // Apple-certificaat; daar downloadt Folio de nieuwe versie zelf en wisselt hij de app bij herstarten om
+  // (zie macDownload). Lukt dat niet, dan tonen we een downloadknop.
   autoUpdater.autoDownload = !isMac;
   // Laatste updatestatus onthouden: elk nieuw geladen scherm (startscherm of Studio) krijgt hem opnieuw.
   let status = null;
   const send = () => { if (status && win && !win.isDestroyed()) win.webContents.send('folio:update', status); };
   autoUpdater.on('update-available', (info) => {
     if (status?.ready) return;
-    status = { version: info.version, mac: isMac };
+    status = { version: info.version };
     send();
+    if (!isMac) return;
+    void macDownload(info).then((ok) => {
+      status = ok ? { version: info.version, ready: true } : { version: info.version, mac: true };
+      send();
+    });
   });
   autoUpdater.on('update-downloaded', (info) => {
     status = { version: info.version, ready: true };
@@ -369,8 +378,81 @@ function checkUpdates() {
   setInterval(() => { if (!status?.ready) void autoUpdater.checkForUpdates().catch(() => {}); }, 60 * 60 * 1000).unref?.();
   ipcMain.handle('folio:install-update', async () => {
     await stopServer();
-    autoUpdater.quitAndInstall();
+    if (isMac) macInstall();
+    else autoUpdater.quitAndInstall();
   });
+}
+
+// ── Mac: zelf bijwerken zonder Apple-certificaat ─────────────
+// Een bestand dat Folio zelf downloadt, krijgt van macOS geen "gedownload van internet"-vlag.
+// Daardoor opent de nieuwe versie zonder waarschuwing. We controleren de download met de
+// sha512 uit latest-mac.yml, pakken de app uit de .dmg en wisselen hem om zodra Folio stopt.
+let macStaged = null;
+let macBusy = false;
+const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+async function macDownload(info) {
+  if (macStaged && macStaged.version === info.version) return true;
+  if (macBusy) return false;
+  macBusy = true;
+  let dir = null;
+  try {
+    const bundle = path.resolve(process.execPath, '..', '..', '..');
+    if (!bundle.endsWith('.app') || bundle.startsWith('/Volumes/')) return false; // draait vanaf de .dmg
+    fs.accessSync(path.dirname(bundle), fs.constants.W_OK);
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const file = (info.files || []).find((f) => /\.dmg$/.test(f.url) && f.url.includes(`-${arch}.`));
+    if (!file) return false;
+    const url = /^https?:/.test(file.url) ? file.url : `https://github.com/JudoxYT/folio/releases/download/v${info.version}/${file.url}`;
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'folio-update-'));
+    const dmg = path.join(dir, 'update.dmg');
+    const res = await fetch(url);
+    if (!res.ok || !res.body) throw new Error(`download gaf ${res.status}`);
+    const hash = crypto.createHash('sha512');
+    const body = Readable.fromWeb(res.body);
+    body.on('data', (c) => hash.update(c));
+    await pipeline(body, fs.createWriteStream(dmg));
+    if (file.sha512 && hash.digest('base64') !== file.sha512) throw new Error('controle van de download mislukt');
+    const mnt = path.join(dir, 'mnt');
+    execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mnt, dmg], { stdio: 'ignore' });
+    try {
+      const src = fs.readdirSync(mnt).find((n) => n.endsWith('.app'));
+      if (!src) throw new Error('geen app gevonden in de .dmg');
+      execFileSync('ditto', [path.join(mnt, src), path.join(dir, 'Folio.app')], { stdio: 'ignore' });
+    } finally {
+      try { execFileSync('hdiutil', ['detach', mnt, '-force'], { stdio: 'ignore' }); } catch { /* al los */ }
+    }
+    fs.rmSync(dmg, { force: true });
+    macStaged = { version: info.version, dir, next: path.join(dir, 'Folio.app'), bundle };
+    return true;
+  } catch (e) {
+    console.error('Mac-update downloaden mislukt:', e && e.message);
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    return false;
+  } finally {
+    macBusy = false;
+  }
+}
+
+/** Na het afsluiten van Folio: oude app vervangen door de nieuwe en opnieuw openen. */
+function macInstall() {
+  if (!macStaged) return void shell.openExternal('https://github.com/JudoxYT/folio/releases/latest');
+  const { dir, next, bundle } = macStaged;
+  const script = path.join(dir, 'bijwerken.sh');
+  fs.writeFileSync(script, [
+    '#!/bin/sh',
+    `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.3; done`,
+    `OLD=${shq(bundle)}`,
+    `NEW=${shq(next)}`,
+    'rm -rf "$OLD.vorige"',
+    'if mv "$OLD" "$OLD.vorige" && ditto "$NEW" "$OLD"; then rm -rf "$OLD.vorige"; else rm -rf "$OLD"; mv "$OLD.vorige" "$OLD"; fi',
+    'xattr -dr com.apple.quarantine "$OLD" 2>/dev/null',
+    'open "$OLD"',
+    `rm -rf ${shq(dir)}`,
+    '',
+  ].join('\n'));
+  spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' }).unref();
+  app.quit();
 }
 
 // ── Website delen als één bestand (.folio) ───────────────────
@@ -457,6 +539,39 @@ async function openFolioFile(file) {
 }
 
 ipcMain.handle('folio:export', (_e, id) => exportSite(id));
+
+// ── Back-ups terugzetten ─────────────────────────────────────
+// De Studio maakt elke dag een kopie (backup/site-JJJJ-MM-DD.db, de laatste 7 dagen).
+const BACKUP_RE = /^site-(\d{4}-\d{2}-\d{2}|voor-terugzetten-[\dT-]+)\.db$/;
+ipcMain.handle('folio:backups', (_e, id) => {
+  const site = readSites().find((s) => s.id === id);
+  if (!site) throw new Error('Website niet gevonden.');
+  const dir = path.join(site.dir, 'backup');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => BACKUP_RE.test(f)).map((f) => {
+    const st = fs.statSync(path.join(dir, f));
+    return { file: f, at: st.mtime.toISOString(), size: st.size, before: f.includes('voor-terugzetten') };
+  }).sort((a, b) => b.at.localeCompare(a.at));
+});
+ipcMain.handle('folio:restore', async (_e, { id, file }) => {
+  const site = readSites().find((s) => s.id === id);
+  if (!site) throw new Error('Website niet gevonden.');
+  if (!BACKUP_RE.test(String(file))) throw new Error('Ongeldige back-up.');
+  const dir = path.join(site.dir, 'backup');
+  const src = path.join(dir, file);
+  if (!fs.existsSync(src)) throw new Error('Deze back-up bestaat niet meer.');
+  if (running && running.site.id === id) await stopServer();
+  settleDb(site.dir);
+  const db = path.join(site.dir, 'site.db');
+  // Eerst de huidige versie bewaren, zodat terugzetten zelf ook terug te draaien is.
+  const stamp = new Date().toISOString().slice(0, 16).replace(/:/g, '-');
+  if (fs.existsSync(db)) fs.copyFileSync(db, path.join(dir, `site-voor-terugzetten-${stamp}.db`));
+  fs.copyFileSync(src, db);
+  for (const ext of ['-wal', '-shm']) fs.rmSync(db + ext, { force: true });
+  // Niet eindeloos bewaren: de 3 nieuwste "voor terugzetten"-kopieën blijven.
+  fs.readdirSync(dir).filter((f) => f.startsWith('site-voor-terugzetten-')).sort().reverse().slice(3).forEach((f) => fs.rmSync(path.join(dir, f), { force: true }));
+  return true;
+});
 ipcMain.handle('folio:import-file', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Kies een Folio-bestand', properties: ['openFile'], filters: [{ name: 'Folio-website', extensions: ['folio'] }] });
   if (r.canceled || !r.filePaths[0]) return null;

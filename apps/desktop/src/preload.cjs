@@ -18,5 +18,7 @@ contextBridge.exposeInMainWorld('folio', {
   revealSite: () => ipcRenderer.invoke('folio:reveal-site'),
   external: (url) => ipcRenderer.invoke('folio:external', url),
   installUpdate: () => ipcRenderer.invoke('folio:install-update'),
+  backups: (id) => ipcRenderer.invoke('folio:backups', id),
+  restore: (id, file) => ipcRenderer.invoke('folio:restore', { id, file }),
   onUpdate: (fn) => ipcRenderer.on('folio:update', (_e, info) => fn(info)),
 });

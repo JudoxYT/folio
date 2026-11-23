@@ -46,6 +46,10 @@
   .dialog { width: min(860px, 100%); max-height: 100%; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 28px; box-shadow: 0 30px 90px rgba(0,0,0,.55); }
   .dialog h2 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.02em; }
   .dialog p { color: var(--muted); margin: 0 0 20px; }
+  .backups { display: grid; gap: 6px; max-height: 340px; overflow: auto; }
+  .backup { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; }
+  .backup small { color: var(--muted); }
+  .backup .grow { flex: 1; }
   label.field { display: block; font-weight: 600; margin-bottom: 18px; }
   label.field input { display: block; width: 100%; margin-top: 8px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: 15px/1.3 inherit; font-family: inherit; outline: none; }
   label.field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,123,255,.25); }

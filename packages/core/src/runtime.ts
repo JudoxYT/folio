@@ -110,11 +110,13 @@ function tf(m){var p=[];if(m.x||m.y)p.push('translate('+(m.x||0)+'px,'+(m.y||0)+
 function lerp(a,b,t){return a+(b-a)*t}
 
 /* ── Reveal ── */
-function hide(el,from){el.style.transition='none';el.style.transform=tf(from);if(from.opacity!=null)el.style.opacity=from.opacity;if(from.blur)el.style.filter='blur('+from.blur+'px)'}
+var CLIP={up:'inset(100% 0 0 0)',down:'inset(0 0 100% 0)',left:'inset(0 0 0 100%)',right:'inset(0 100% 0 0)'};
+function hide(el,from){el.style.transition='none';el.style.transform=tf(from);if(from.opacity!=null)el.style.opacity=from.opacity;if(from.blur)el.style.filter='blur('+from.blur+'px)';if(from.clip&&CLIP[from.clip])el.style.clipPath=CLIP[from.clip]}
 function play(el,r,delay){
   var t=(r.duration||800)+'ms '+(r.easing||'ease')+' '+(delay||0)+'ms';
-  el.style.transition='transform '+t+',opacity '+t+',filter '+t;
-  requestAnimationFrame(function(){el.style.transform='';el.style.opacity='';el.style.filter=''});
+  el.style.transition='transform '+t+',opacity '+t+',filter '+t+',clip-path '+t;
+  requestAnimationFrame(function(){el.style.transform='';el.style.opacity='';el.style.filter='';if(el.style.clipPath)el.style.clipPath='inset(0 0 0 0)'});
+  if(el.style.clipPath)setTimeout(function(){el.style.clipPath=''},(r.duration||800)+(delay||0)+60);
   setTimeout(function(){el.style.transition=''},(r.duration||800)+(delay||0)+50);
 }
 function targets(it){var r=it.d.reveal;return r.stagger?[].slice.call(it.el.children):[it.el]}
@@ -387,10 +389,16 @@ kick();
   f.addEventListener('submit',function(e){
     e.preventDefault();
     var btn=f.querySelector('.v-submit'),msg=f.querySelector('.v-form-msg'),data={};
-    new FormData(f).forEach(function(v,k){data[k]=v});
+    var mail=f.hasAttribute('data-mail');
+    if(mail){
+      /* Via e-mail (FormSubmit): velden met hun label, plus onderwerp en antwoordadres. */
+      [].slice.call(f.querySelectorAll('[data-l]')).forEach(function(el){data[el.getAttribute('data-l')]=el.value;if(el.type==='email'&&el.value)data._replyto=el.value});
+      var hp=f.querySelector('.v-hp');data._honey=hp?hp.value:'';
+      data._subject='Nieuw bericht via '+(f.getAttribute('data-name')||'je website');data._template='table';data._captcha='false';
+    }else new FormData(f).forEach(function(v,k){data[k]=v});
     btn.disabled=true;msg.className='v-form-msg';msg.textContent='Versturen…';
-    fetch(f.action,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)})
-      .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Er ging iets mis');return j})})
+    fetch(f.action,{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify(data)})
+      .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok||j.success===false||j.success==='false')throw new Error(j.error||j.message||'Er ging iets mis');return j})})
       .then(function(){f.reset();msg.textContent=f.getAttribute('data-success')||'Bedankt! Je bericht is verstuurd.'})
       .catch(function(err){msg.className='v-form-msg err';msg.textContent=err.message})
       .then(function(){btn.disabled=false});

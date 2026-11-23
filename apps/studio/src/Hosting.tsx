@@ -38,45 +38,107 @@ export function HostingModal() {
 type FolioBridge = { revealSite: () => Promise<void>; external: (u: string) => Promise<void> };
 const bridge = () => (window as unknown as { folio?: FolioBridge }).folio;
 
-/** Folio: de makkelijkste manieren om je site online te zetten, zonder accounts te koppelen. */
+interface NetlifyState {
+  hasToken: boolean;
+  siteId: string;
+  name: string;
+  url: string;
+  adminUrl: string;
+  autoPush: boolean;
+  last: { ok: boolean; message: string; url?: string; at: string } | null;
+}
+
+/** Folio: met één klik online via Netlify, of zonder account via Netlify Drop / zip. */
 function Online() {
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const prepare = async () => {
-    setBusy(true);
+  const [n, setN] = useState<NetlifyState | null>(null);
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = async () => setN(await api.get<NetlifyState>('/api/netlify'));
+  useEffect(() => void load(), []);
+  const save = async (body: Record<string, unknown>, label = 'save') => {
+    setBusy(label);
     try {
-      await flushSave();
-      await api.post('/api/publish');
-      setDone(true);
-      await bridge()?.revealSite();
+      setN(await api.put<NetlifyState>('/api/netlify', body));
+      setToken('');
+      return true;
+    } catch (e) {
+      toast((e as Error).message, 'error');
+      return false;
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+  const push = async () => {
+    setBusy('push');
+    try {
+      await flushSave();
+      const r = await api.post<{ message: string; url?: string }>('/api/netlify/push');
+      toast(r.message);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(null);
+      await load();
+    }
+  };
+  if (!n) return <p className="vs-help">Laden…</p>;
+  const open = (u: string) => void bridge()?.external(u);
   return (
     <div>
       <p className="vs-help" style={{ marginBottom: 18 }}>
-        Je website is een map met gewone bestanden (HTML, afbeeldingen). Die kun je overal online zetten. Dit is de snelste manier, gratis en zonder iets te installeren:
+        Zet je website gratis online via Netlify. Na één keer koppelen is het daarna steeds één klik, en je adres blijft hetzelfde.
       </p>
-      <h3 style={{ margin: '4px 0 12px' }}>Gratis online met Netlify Drop</h3>
-      <Step n={1} title="Maak je website klaar" done={done}>
-        <p>Folio zet de nieuwste versie in een map en opent die voor je.</p>
-        <button className="vs-btn primary" disabled={busy} onClick={prepare}>{busy ? 'Bezig…' : 'Website klaarmaken en map openen'}</button>
+      <Step n={1} title="Maak een gratis Netlify-account" done={n.hasToken}>
+        <p>Log in of maak een account, bijvoorbeeld met je Google- of GitHub-account.</p>
+        <div className="vs-row-buttons"><button className="vs-btn" onClick={() => open('https://app.netlify.com/signup')}>Netlify openen ↗</button></div>
       </Step>
-      <Step n={2} title="Open Netlify Drop">
-        <p>Maak een gratis account (bijvoorbeeld met je Google- of GitHub-account), dan kun je je site later bijwerken en een eigen naam geven.</p>
-        <button className="vs-btn" onClick={() => void bridge()?.external('https://app.netlify.com/drop')}>Netlify Drop openen ↗</button>
+      <Step n={2} title="Maak een toegangssleutel en plak hem hier" done={n.hasToken}>
+        {n.hasToken ? (
+          <p>Gekoppeld. <button className="vs-btn danger" disabled={!!busy} onClick={() => save({ token: null, forget: true })}>Ontkoppelen</button></p>
+        ) : (
+          <>
+            <p>Ga naar <b>User settings → Applications → Personal access tokens</b> en klik op <b>New access token</b>. Geef hem een naam (bijvoorbeeld <code>Folio</code>), kies een verloopdatum en kopieer de sleutel.</p>
+            <div className="vs-row-buttons">
+              <button className="vs-btn" onClick={() => open('https://app.netlify.com/user/applications#personal-access-tokens')}>Sleutelpagina openen ↗</button>
+            </div>
+            <div className="vs-row-buttons">
+              <input className="vs-input" type="password" value={token} placeholder="Plak je Netlify-sleutel" onChange={(e) => setToken(e.target.value)} autoComplete="off" style={{ flex: 1 }} />
+              <button className="vs-btn primary" disabled={!token.trim() || !!busy} onClick={() => save({ token })}>{busy === 'save' ? 'Controleren…' : 'Koppelen'}</button>
+            </div>
+            <p className="vs-help">De sleutel blijft alleen op deze computer, in de map van je website.</p>
+          </>
+        )}
       </Step>
-      <Step n={3} title="Sleep de map naar de pagina">
-        <p>Sleep de map <code>site</code> (die net is geopend) naar het vak op de Netlify-pagina. Na een paar seconden krijg je een adres zoals <code>jouw-naam.netlify.app</code>. Klaar!</p>
+      <Step n={3} title="Zet hem online" done={!!n.last?.ok}>
+        <p>Folio maakt de nieuwste versie en zet hem op Netlify.{!n.siteId && ' De eerste keer maakt Folio daar zelf een site voor je aan.'}</p>
+        <div className="vs-row-buttons">
+          <button className="vs-btn primary" disabled={!n.hasToken || !!busy} onClick={push}>{busy === 'push' ? 'Bezig… (kan een minuutje duren)' : n.siteId ? 'Nieuwe versie online zetten' : 'Online zetten'}</button>
+        </div>
+        {n.url && (
+          <div className="vs-callout ok">
+            Je site staat op <a href={n.url} onClick={(e) => { e.preventDefault(); open(n.url); }}>{n.url.replace(/^https?:\/\//, '')}</a>
+          </div>
+        )}
+        {n.last && !n.last.ok && <div className="vs-callout err">{n.last.message}</div>}
+        {n.siteId && (
+          <Toggle value={n.autoPush} onChange={(v) => void save({ autoPush: v })} label="Ook online zetten bij elke klik op Publiceren" />
+        )}
       </Step>
-      <Step n={4} title="Later bijwerken">
-        <p>Heb je iets veranderd? Doe stap 1 opnieuw en sleep de map in Netlify naar <b>Deploys</b> van je site. Het adres blijft hetzelfde.</p>
-      </Step>
-      <h3 style={{ margin: '26px 0 8px' }}>Of: download als zip</h3>
-      <p className="vs-help">Voor een eigen hosting, je school of om op te sturen. Pak de zip uit en upload de inhoud naar je webserver.</p>
-      <a className="vs-btn" href="/api/export.zip" download>Website downloaden als zip</a>
-      <p className="vs-help" style={{ marginTop: 18 }}>Let op: een contactformulier werkt alleen met GitHub + Vercel of je eigen server. Op Netlify en andere hosts kun je beter een mailadres als link gebruiken.</p>
+      {n.siteId && (
+        <Step n={4} title="Eigen domein of andere naam (optioneel)">
+          <p>Een eigen domein koppel je in Netlify bij <b>Domain management</b>. Vul het daarna ook in bij ⚙ Site-instellingen, voor Google en voor de deel-afbeelding.</p>
+          <div className="vs-row-buttons"><button className="vs-btn" onClick={() => open(`${n.adminUrl}/domain-management`)}>Domeininstellingen openen ↗</button></div>
+        </Step>
+      )}
+      <details style={{ marginTop: 22 }}>
+        <summary className="vs-muted">Liever zonder account? (Netlify Drop of zip)</summary>
+        <p className="vs-help">Folio zet je website in een map. Die sleep je naar <a href="https://app.netlify.com/drop" onClick={(e) => { e.preventDefault(); open('https://app.netlify.com/drop'); }}>Netlify Drop</a>, of je downloadt hem als zip voor een andere host.</p>
+        <div className="vs-row-buttons">
+          <button className="vs-btn" disabled={!!busy} onClick={async () => { setBusy('drop'); try { await flushSave(); await api.post('/api/publish'); await bridge()?.revealSite(); } finally { setBusy(null); } }}>Map klaarmaken en openen</button>
+          <a className="vs-btn" href="/api/export.zip" download>Downloaden als zip</a>
+        </div>
+      </details>
+      <p className="vs-help" style={{ marginTop: 18 }}>Contactformulier? Vul bij ⚙ Site-instellingen → Formulieren je e-mailadres in; dan komen berichten in je mail, ook op Netlify.</p>
     </div>
   );
 }
